@@ -1,0 +1,45 @@
+# --- Unreal Engine (project lives in UE/) ---
+UE/Binaries/
+UE/Build/
+UE/DerivedDataCache/
+UE/Intermediate/
+UE/Saved/
+UE/Plugins/*/Binaries/
+UE/Plugins/*/Intermediate/
+UE/.idea/
+UE/enc_temp_folder/
+
+# Generated IDE files
+*.sln
+*.slnx
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.xcodeproj
+*.xcworkspace
+*.code-workspace
+.vs/
+.vscode/
+
+# Compiled outputs
+*.obj
+*.o
+*.pch
+*.gch
+*.exe
+*.out
+*.app
+*.ipa
+
+# OS / misc
+*.log
+Thumbs.db
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local Claude settings and secrets
+.claude/settings.local.json
+.env.local

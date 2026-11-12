@@ -1,0 +1,91 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "TSCColonyCameraPawn.h"
+
+#include "Camera/CameraComponent.h"
+#include "Components/SceneComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
+
+ATSCColonyCameraPawn::ATSCColonyCameraPawn()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	bUseControllerRotationYaw = false;
+
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	SetRootComponent(Root);
+
+	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+	SpringArm->SetupAttachment(Root);
+	SpringArm->bDoCollisionTest = false;
+	SpringArm->bUsePawnControlRotation = false;
+	SpringArm->bInheritPitch = false;
+	SpringArm->bInheritRoll = false;
+	SpringArm->bInheritYaw = true;
+	SpringArm->SetRelativeRotation(FRotator(CameraPitch, 0.f, 0.f));
+	SpringArm->TargetArmLength = ReferenceArmLength;
+
+	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+
+	DesiredArmLength = ReferenceArmLength;
+}
+
+void ATSCColonyCameraPawn::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// Pan speed grows with zoom so the camera feels the same at every height.
+	const float ZoomScale = SpringArm->TargetArmLength / FMath::Max(ReferenceArmLength, 1.f);
+	const FRotator YawOnly(0.f, GetActorRotation().Yaw, 0.f);
+
+	// Keyboard + optional edge scroll
+	FVector2D Pan = PendingPan;
+	if (bEdgeScrollEnabled)
+	{
+		if (const APlayerController* PC = Cast<APlayerController>(GetController()))
+		{
+			float MouseX = 0.f, MouseY = 0.f;
+			int32 SizeX = 0, SizeY = 0;
+			PC->GetViewportSize(SizeX, SizeY);
+			if (SizeX > 0 && SizeY > 0 && PC->GetMousePosition(MouseX, MouseY))
+			{
+				if (MouseX <= EdgeScrollMargin) { Pan.X -= 1.f; }
+				if (MouseX >= SizeX - EdgeScrollMargin) { Pan.X += 1.f; }
+				if (MouseY <= EdgeScrollMargin) { Pan.Y += 1.f; }
+				if (MouseY >= SizeY - EdgeScrollMargin) { Pan.Y -= 1.f; }
+			}
+		}
+	}
+	Pan = Pan.GetSafeNormal() * FMath::Min(Pan.Size(), 1.f);
+	if (!Pan.IsNearlyZero())
+	{
+		const FVector Local(Pan.Y, Pan.X, 0.f); // forward = +X, right = +Y
+		AddActorWorldOffset(YawOnly.RotateVector(Local) * PanSpeed * ZoomScale * DeltaSeconds);
+	}
+
+	// Middle-mouse drag: move the camera opposite to the mouse so the ground follows the cursor.
+	if (!PendingDrag.IsNearlyZero())
+	{
+		const FVector Local(-PendingDrag.Y, -PendingDrag.X, 0.f);
+		AddActorWorldOffset(YawOnly.RotateVector(Local) * DragPanSpeed * ZoomScale);
+	}
+
+	// Rotate
+	if (!FMath::IsNearlyZero(PendingRotate))
+	{
+		AddActorWorldRotation(FRotator(0.f, FMath::Clamp(PendingRotate, -1.f, 1.f) * RotateSpeed * DeltaSeconds, 0.f));
+	}
+
+	// Zoom (smoothed)
+	if (!FMath::IsNearlyZero(PendingZoom))
+	{
+		DesiredArmLength = FMath::Clamp(DesiredArmLength - PendingZoom * ZoomStep, MinArmLength, MaxArmLength);
+	}
+	SpringArm->TargetArmLength = FMath::FInterpTo(SpringArm->TargetArmLength, DesiredArmLength, DeltaSeconds, ZoomInterpSpeed);
+
+	PendingPan = FVector2D::ZeroVector;
+	PendingDrag = FVector2D::ZeroVector;
+	PendingZoom = 0.f;
+	PendingRotate = 0.f;
+}

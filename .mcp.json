@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["Scripts/mcp/ue_mcp_proxy.py"]
+    }
+  }
+}

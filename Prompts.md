@@ -1,0 +1,1 @@
+- create empty UE 5.9 project with MCP settings enabled. The project should be ready for game jam development - colony sim game in Viking style. Should we use some sample project for it?
