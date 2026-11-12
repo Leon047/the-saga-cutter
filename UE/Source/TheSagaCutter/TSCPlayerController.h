@@ -32,6 +32,9 @@ private:
 	void OnZoom(const FInputActionValue& Value);
 	void OnRotate(const FInputActionValue& Value);
 	void OnLook(const FInputActionValue& Value);
+	void OnClick();
+	void OnCutKey();
+	void OnBuildKey(int32 Index);
 	void OnDragStarted() { bDragging = true; }
 	void OnDragCompleted() { bDragging = false; }
 

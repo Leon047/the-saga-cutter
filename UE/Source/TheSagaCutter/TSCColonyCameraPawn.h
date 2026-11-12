@@ -44,11 +44,11 @@ protected:
 
 	/** Pan speed in uu/s at the reference arm length. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Pan")
-	float PanSpeed = 1800.f;
+	float PanSpeed = 2600.f;
 
 	/** World units per raw mouse unit while dragging, at the reference arm length. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Pan")
-	float DragPanSpeed = 60.f;
+	float DragPanSpeed = 8.f;
 
 	/** Pan with the cursor near the screen edge. Off by default so PIE does not scroll away unexpectedly. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Pan")
@@ -59,17 +59,17 @@ protected:
 	float EdgeScrollMargin = 24.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
-	float ReferenceArmLength = 2400.f;
+	float ReferenceArmLength = 16500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
-	float MinArmLength = 600.f;
+	float MinArmLength = 6000.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
-	float MaxArmLength = 6000.f;
+	float MaxArmLength = 20000.f;
 
 	/** Arm length change per wheel notch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
-	float ZoomStep = 250.f;
+	float ZoomStep = 1200.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
 	float ZoomInterpSpeed = 8.f;
@@ -79,7 +79,7 @@ protected:
 	float RotateSpeed = 90.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-	float CameraPitch = -55.f;
+	float CameraPitch = -36.f;
 
 private:
 	FVector2D PendingPan = FVector2D::ZeroVector;

@@ -27,6 +27,7 @@ ATSCColonyCameraPawn::ATSCColonyCameraPawn()
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+	Camera->SetFieldOfView(28.f); // narrow lens far away: close to an isometric projection
 
 	DesiredArmLength = ReferenceArmLength;
 }
@@ -71,11 +72,12 @@ void ATSCColonyCameraPawn::Tick(float DeltaSeconds)
 		AddActorWorldOffset(YawOnly.RotateVector(Local) * DragPanSpeed * ZoomScale);
 	}
 
-	// Rotate
-	if (!FMath::IsNearlyZero(PendingRotate))
-	{
-		AddActorWorldRotation(FRotator(0.f, FMath::Clamp(PendingRotate, -1.f, 1.f) * RotateSpeed * DeltaSeconds, 0.f));
-	}
+	// The view is a fixed isometric one (the tile constructions are drawn for it), so there is no rotation.
+	// Keep the camera over the clearing.
+	FVector Loc = GetActorLocation();
+	Loc.X = FMath::Clamp(Loc.X, -3600.f, 3600.f);
+	Loc.Y = FMath::Clamp(Loc.Y, -2800.f, 2800.f);
+	SetActorLocation(Loc);
 
 	// Zoom (smoothed)
 	if (!FMath::IsNearlyZero(PendingZoom))

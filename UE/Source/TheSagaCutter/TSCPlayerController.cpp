@@ -10,6 +10,8 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "TSCColonyCameraPawn.h"
+#include "TSCGameMode.h"
+#include "TSCHUD.h"
 #include "TheSagaCutter.h"
 
 ATSCPlayerController::ATSCPlayerController()
@@ -106,7 +108,11 @@ void ATSCPlayerController::SetupInputComponent()
 		EIC->BindAction(DragAction, ETriggerEvent::Completed, this, &ATSCPlayerController::OnDragCompleted);
 		EIC->BindAction(DragAction, ETriggerEvent::Canceled, this, &ATSCPlayerController::OnDragCompleted);
 	}
-	else
+	// Game UI: plain key bindings are enough.
+	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ATSCPlayerController::OnClick);
+	InputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &ATSCPlayerController::OnCutKey);
+	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ATSCPlayerController::OnCutKey);
+	if (!Cast<UEnhancedInputComponent>(InputComponent))
 	{
 		UE_LOG(LogSaga, Error, TEXT("InputComponent is not an EnhancedInputComponent - check DefaultInput.ini"));
 	}
@@ -145,5 +151,33 @@ void ATSCPlayerController::OnLook(const FInputActionValue& Value)
 	if (ATSCColonyCameraPawn* CameraPawn = GetCameraPawn())
 	{
 		CameraPawn->AddDragInput(Value.Get<FVector2D>());
+	}
+}
+
+void ATSCPlayerController::OnClick()
+{
+	float X = 0.f, Y = 0.f;
+	if (ATSCHUD* Hud = Cast<ATSCHUD>(GetHUD()))
+	{
+		if (GetMousePosition(X, Y))
+		{
+			Hud->HandleClick(FVector2D(X, Y));
+		}
+	}
+}
+
+void ATSCPlayerController::OnCutKey()
+{
+	if (ATSCHUD* Hud = Cast<ATSCHUD>(GetHUD()))
+	{
+		Hud->HandleCutKey();
+	}
+}
+
+void ATSCPlayerController::OnBuildKey(int32 Index)
+{
+	if (ATSCGameMode* GM = GetWorld()->GetAuthGameMode<ATSCGameMode>())
+	{
+		GM->StartBuild((TSC::EBuilding)Index);
 	}
 }
