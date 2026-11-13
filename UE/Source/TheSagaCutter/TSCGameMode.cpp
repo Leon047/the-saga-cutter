@@ -30,6 +30,19 @@ namespace
 	const FIntRect GroveRect(10, 19, 21, 27);
 	const FIntRect DockRect(26, 9, 34, 15);
 
+	// The palisade: a superellipse in cell units (between a circle and a square) with its west apex on the gate,
+	// running from the north shore round the west to the south shore. Open to the water in the east.
+	const float WallCX = 19.f, WallCY = 12.f, WallA = 11.f, WallB = 14.f, WallN = 2.8f, WallEndX = 27.55f;
+	float SignedPow(float V, float E) { return FMath::Sign(V) * FMath::Pow(FMath::Abs(V), E); }
+	FVector2D WallCellAt(float T)
+	{
+		return FVector2D(WallCX - WallA * SignedPow(FMath::Cos(T), 2.f / WallN), WallCY + WallB * SignedPow(FMath::Sin(T), 2.f / WallN));
+	}
+	/** < 1 inside the wall curve. */
+	float WallShape(float Cx, float Cy) { return FMath::Pow(FMath::Abs(Cx - WallCX) / WallA, WallN) + FMath::Pow(FMath::Abs(Cy - WallCY) / WallB, WallN); }
+	/** Curve parameter of the south shore end (the north end is its negative). */
+	float WallEndT() { return FMath::Acos(-FMath::Pow((WallEndX - WallCX) / WallA, WallN * 0.5f)); }
+
 	bool InRect(const FIntRect& R, int32 X, int32 Y) { return X >= R.Min.X && X < R.Max.X && Y >= R.Min.Y && Y < R.Max.Y; }
 	uint32 Hash2(int32 X, int32 Y) { return HashCombine(GetTypeHash(X * 73856093), GetTypeHash(Y * 19349663)); }
 	float Rand01(int32 X, int32 Y, int32 Salt = 0) { return (Hash2(X + Salt * 31, Y - Salt * 17) % 10000) / 10000.f; }
@@ -211,9 +224,14 @@ bool ATSCGameMode::FindPath(const FVector& From, const FVector& To, TArray<FVect
 
 bool ATSCGameMode::CanReach(const ATSCUnit* A, const ATSCUnit* B) const
 {
-	const float X = WallX() + CELL * 0.5f;
-	const bool bAWest = A->GetActorLocation().X < X;
-	const bool bBWest = B->GetActorLocation().X < X;
+	// outside = beyond the curve on the forest side (the open shore end counts as inside)
+	auto Outside = [](const FVector& P)
+	{
+		const float Cx = P.X / CELL + GW / 2, Cy = P.Y / CELL + GH / 2;
+		return Cx < WallCX && WallShape(Cx, Cy) > 1.f;
+	};
+	const bool bAWest = Outside(A->GetActorLocation());
+	const bool bBWest = Outside(B->GetActorLocation());
 	if (bAWest == bBWest) { return true; }
 	return (!bGateClosed || bGateBroken) && !IsBlocked(TreeX, TreeY + 1);
 }
@@ -337,18 +355,38 @@ void ATSCGameMode::BuildWorld()
 		}
 	}
 
+	// ----- palisade line (dense samples, north shore end to south shore end) -----
+	TArray<FVector> WallLine;
+	{
+		const float TE = WallEndT();
+		for (int32 I = 0; I <= 2400; ++I)
+		{
+			const FVector2D C = WallCellAt(FMath::Lerp(-TE, TE, I / 2400.f));
+			WallLine.Add(CellF(C.X, C.Y));
+		}
+	}
+	auto WallDist = [&WallLine](const FVector& P)
+	{
+		float D = BIG_NUMBER;
+		for (int32 I = 0; I < WallLine.Num(); I += 8) { D = FMath::Min(D, (float)FVector::Dist2D(P, WallLine[I])); }
+		return D;
+	};
+
 	// ----- forest (west) and the framing trees -----
 	for (int32 X = -6; X < GW + 2; ++X)
 	{
 		for (int32 Y = -4; Y < GH + 4; ++Y)
 		{
 			const bool bForest = X <= 6;
-			const bool bFrame = !bForest && X >= 9 && X <= 27 && (Y <= -1 || Y >= GH + 1);
-			const bool bGroveTree = X >= 10 && X <= 20 && Y >= 21 && Y <= GH && !(X >= 13 && X <= 17 && Y <= 22);
+			// framing trees outside the palisade (not on the shore side nor in front of the gate), grove trees inside it
+			const float Shape = WallShape(X + 0.5f, Y + 0.5f);
+			const bool bFrame = !bForest && X >= 8 && X <= 27 && Shape > 1.f && (X + 0.5f < WallCX || !InGrid(X, Y))
+				&& !(X <= 9 && Y >= 9 && Y <= 14);
+			const bool bGroveTree = X >= 10 && X <= 20 && Y >= 21 && Y <= GH && !(X >= 13 && X <= 17 && Y <= 22) && Shape < 1.f;
 			if (!bForest && !bFrame && !bGroveTree) { continue; }
 			if (X > 27) { UE_LOG(LogSaga, Warning, TEXT("[Saga] tree loop: X=%d Y=%d forest=%d frame=%d grove=%d"), X, Y, bForest, bFrame, bGroveTree); continue; }
 			if (bForest && (Y == 11 || Y == 12)) { continue; } // forest road
-			if (!bForest && (Y == -1 || Y == GH)) { continue; } // north/south log walls (placed in Map_Saga)
+			if (!bForest && WallDist(CellCenter(X, Y)) < 170.f) { continue; } // keep the palisade clear
 			const float Density = bForest ? (X >= 5 ? 0.42f : 0.62f) : bGroveTree ? 0.4f : 0.5f;
 			if (Rand01(X, Y, 7) > Density)
 			{
@@ -377,22 +415,58 @@ void ATSCGameMode::BuildWorld()
 	}
 
 	// ----- palisade and gate (west) -----
-	// SM_WoodenFence log sections from the north to the south log wall placed in Map_Saga (y = -2500 / +2500),
-	// broken by the gate. The per-cell actors keep the Ashen stone footing and the path blocking.
-	bool bMeshWall = true;
-	for (const FVector2D& Run : { FVector2D(-2500.f, CellCorner(GateX, GateY).Y), FVector2D(CellCorner(GateX, GateY + 2).Y, 2500.f) })
+	// One rounded log wall along WallLine, broken by the gate: straight segments of about 3 m, each an SM_WoodenFence
+	// section with the Ashen stone footing. The cells under the wall block the paths.
 	{
-		ATSCPrimActor* P = SpawnPrim(FVector(WallX(), 0.f, 0.f));
-		bMeshWall &= BuildPalisadeRun(P, Run.X, Run.Y, FMath::RoundToInt(Run.X));
-		P->Refresh();
-	}
-	for (int32 Y = -1; Y <= GH; ++Y)
-	{
-		if (Y == GateY || Y == GateY + 1) { continue; }
-		ATSCPrimActor* P = SpawnPrim(CellCorner(GateX, Y));
-		BuildPalisadeCell(P, Y + 20, !bMeshWall);
-		P->Refresh();
-		SetBlocked(GateX, Y, true);
+		const float GateY0 = CellCorner(GateX, GateY).Y, GateY1 = CellCorner(GateX, GateY + 2).Y;
+		TArray<FVector> Runs[2];
+		for (const FVector& P : WallLine)
+		{
+			if (P.Y > GateY0 && P.Y < GateY1) { continue; }
+			Runs[P.Y <= GateY0 ? 0 : 1].Add(P);
+			for (const FVector& O : { FVector::ZeroVector, FVector(30.f, 0.f, 0.f), FVector(-30.f, 0.f, 0.f), FVector(0.f, 30.f, 0.f), FVector(0.f, -30.f, 0.f) })
+			{
+				const FIntPoint C = WorldToCell(P + O);
+				SetBlocked(C.X, C.Y, true);
+			}
+		}
+		Runs[0].Add(FVector(WallX(), GateY0, 0.f));
+		Runs[1].Insert(FVector(WallX(), GateY1, 0.f), 0);
+		int32 Seg = 0;
+		for (const TArray<FVector>& Run : Runs)
+		{
+			float Len = 0.f;
+			for (int32 I = 1; I < Run.Num(); ++I) { Len += FVector::Dist2D(Run[I - 1], Run[I]); }
+			const int32 N = FMath::Max(1, FMath::RoundToInt(Len / 295.f));
+			const float Step = Len / N;
+			// cut the run into N straight segments of equal length
+			TArray<FVector> Knots = { Run[0] };
+			float Acc = 0.f, Next = Step;
+			for (int32 I = 1; I < Run.Num(); ++I)
+			{
+				const float D = FVector::Dist2D(Run[I - 1], Run[I]);
+				while (Knots.Num() < N && D > 0.f && Acc + D >= Next)
+				{
+					Knots.Add(FMath::Lerp(Run[I - 1], Run[I], (Next - Acc) / D));
+					Next += Step;
+				}
+				Acc += D;
+			}
+			Knots.Add(Run.Last());
+			for (int32 I = 0; I + 1 < Knots.Num(); ++I)
+			{
+				const FVector Dir = Knots[I + 1] - Knots[I];
+				ATSCPrimActor* P = SpawnPrim(Knots[I]);
+				P->SetActorRotation(FRotator(0.f, FMath::RadiansToDegrees(FMath::Atan2(Dir.Y, Dir.X)) - 90.f, 0.f));
+				BuildPalisadeSegment(P, Dir.Size2D(), Seg++);
+				P->Refresh();
+			}
+		}
+		// the gate and the road in front of it stay open
+		SetBlocked(GateX, GateY, bGateClosed);
+		SetBlocked(GateX, GateY + 1, bGateClosed);
+		SetBlocked(GateX - 1, GateY, false);
+		SetBlocked(GateX - 1, GateY + 1, false);
 	}
 	Gate = SpawnPrim(CellCorner(GateX, GateY));
 	BuildGate(Gate, GateLeaves);
@@ -429,7 +503,7 @@ void ATSCGameMode::BuildWorld()
 			BuildHouse(A, I + 1);
 			A->Refresh();
 		}
-		for (const FVector2D& L : { FVector2D(13.5f, 4.5f), FVector2D(9.5f, 5.5f) })
+		for (const FVector2D& L : { FVector2D(13.5f, 4.5f), FVector2D(10.2f, 6.4f) })
 		{
 			A = SpawnPrim(CellF(L.X, L.Y));
 			BuildLogPile(A);

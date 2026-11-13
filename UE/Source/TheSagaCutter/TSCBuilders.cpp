@@ -370,39 +370,35 @@ namespace TSC
 		A->AddLight(FVector(W * CELL, 0.f, 170.f), Pal::Fire, 3.f, 0.f, 600.f);
 	}
 
-	bool BuildPalisadeRun(ATSCPrimActor* A, float Y0, float Y1, int32 Seed)
+	void BuildPalisadeSegment(ATSCPrimActor* A, float Len, int32 Seed)
 	{
 		static UStaticMesh* Log = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenFence/SM_WoodenFence.SM_WoodenFence"));
-		if (!Log) { return false; }
-		// The section runs 311 cm along local -Y from its pivot, with its thickness centred at local x = 15.5.
-		// Turn it around so the supports face into the base while keeping the logs on the same wall line.
-		const float Len = Y1 - Y0;
-		const int32 N = FMath::Max(1, FMath::RoundToInt(Len / 295.f));
-		const float Step = Len / N;
-		for (int32 I = 0; I < N; ++I)
+		if (Log)
 		{
-			const float Sz = 0.92f + 0.06f * ((FMath::Abs(Seed) + I * 7) % 4);
-			const bool bMirror = (I % 2) != 0;
-			const float Width = Step * 1.03f;
-			const float StartY = Y0 + Step * I + (bMirror ? Width : 0.f);
+			// The section runs 311 cm along local -Y from its pivot, with its thickness centred at local x = 15.5.
+			// Turn it around so the supports face into the base while keeping the logs on the wall line. Every other
+			// section is mirrored, and each overlaps its neighbours a little to close the joints of the curve.
+			const float Sz = 0.92f + 0.06f * ((Seed * 7) % 4);
+			const bool bMirror = (Seed % 2) != 0;
+			const float Width = Len * 1.04f;
+			const float StartY = -Len * 0.02f + (bMirror ? Width : 0.f);
 			A->AddMeshPart(Log, FVector(15.5f, StartY, 0.f), FRotator(0.f, 180.f, 0.f), FVector(1.f, (bMirror ? -Width : Width) / 311.f, Sz));
 		}
-		return true;
-	}
-
-	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed, bool bLogs)
-	{
-		// A row of sharpened log tiles along the west edge of the cell.
-		for (int32 I = 0; bLogs && I < 3; ++I)
+		else
 		{
-			const float Y = (I + 0.5f) * CELL / 3.f;
-			const float H = 215.f + 26.f * ((Seed * 3 + I * 5) % 4);
-			const FLinearColor Col = Pal::Timber * (0.75f + 0.12f * ((Seed + I * 2) % 4));
-			A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H * 0.5f), FRotator::ZeroRotator, FVector(0.1f, 0.64f, H / 100.f), Col);
-			A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H), FRotator(0.f, 0.f, 45.f), FVector(0.1f, 0.45f, 0.45f), Col * 0.8f);
+			// A row of sharpened log tiles.
+			const int32 N = FMath::Max(1, FMath::RoundToInt(Len / 67.f));
+			for (int32 I = 0; I < N; ++I)
+			{
+				const float Y = (I + 0.5f) * Len / N;
+				const float H = 215.f + 26.f * ((Seed * 3 + I * 5) % 4);
+				const FLinearColor Col = Pal::Timber * (0.75f + 0.12f * ((Seed + I * 2) % 4));
+				A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H * 0.5f), FRotator::ZeroRotator, FVector(0.1f, 0.96f * Len / N / 100.f, H / 100.f), Col);
+				A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H), FRotator(0.f, 0.f, 45.f), FVector(0.1f, 0.45f, 0.45f), Col * 0.8f);
+			}
 		}
 		// The Ashen Saga rebuilt its wall on a stone footing: stronger fortifications.
-		const int32 Base = A->AddPart(ETSCShape::Cube, FVector(-6.f, CELL * 0.5f, 45.f), FRotator::ZeroRotator, FVector(0.3f, 2.f, 0.9f), Pal::Stone);
+		const int32 Base = A->AddPart(ETSCShape::Cube, FVector(-6.f, Len * 0.5f, 45.f), FRotator::ZeroRotator, FVector(0.3f, Len / 100.f, 0.9f), Pal::Stone);
 		A->SetAshen(Base, Pal::StoneDark * 1.3f);
 		A->SetVis(Base, ETSCVis::AshenOnly);
 	}
