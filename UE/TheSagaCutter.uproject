@@ -15,42 +15,144 @@
 		}
 	],
 	"Plugins": [
-		{ "Name": "ModelingToolsEditorMode", "Enabled": true, "TargetAllowList": [ "Editor" ] },
-
-		{ "Name": "EnhancedInput", "Enabled": true },
-		{ "Name": "StateTree", "Enabled": true },
-		{ "Name": "GameplayStateTree", "Enabled": true },
-		{ "Name": "SmartObjects", "Enabled": true },
-		{ "Name": "PCG", "Enabled": true },
-
-		{ "Name": "PythonScriptPlugin", "Enabled": true },
-		{ "Name": "EditorScriptingUtilities", "Enabled": true },
-
-		{ "Name": "ModelContextProtocol", "Enabled": true },
-		{ "Name": "ToolsetRegistry", "Enabled": true },
-		{ "Name": "AIAssistant", "Enabled": false },
-		{ "Name": "UnrealCanvasAnnotations", "Enabled": true },
-		{ "Name": "UnrealCanvasGraph", "Enabled": true },
-		{ "Name": "UnrealCanvasBridge", "Enabled": false },
-		{ "Name": "MCPClientToolset", "Enabled": true },
-		{ "Name": "AllToolsets", "Enabled": true },
-		{ "Name": "EditorToolset", "Enabled": true },
-		{ "Name": "BlueprintToolsets", "Enabled": true },
-		{ "Name": "ConsoleToolset", "Enabled": true },
-		{ "Name": "FileSystemToolset", "Enabled": true },
-		{ "Name": "InputToolset", "Enabled": true },
-		{ "Name": "NavMeshToolset", "Enabled": true },
-		{ "Name": "StateTreeToolset", "Enabled": true },
-		{ "Name": "AIModuleToolset", "Enabled": true },
-		{ "Name": "DataRegistryToolset", "Enabled": true },
-		{ "Name": "GameplayTagsToolset", "Enabled": true },
-		{ "Name": "ConfigSettingsToolset", "Enabled": true },
-		{ "Name": "PluginToolset", "Enabled": true },
-		{ "Name": "AutomationTestToolset", "Enabled": true },
-		{ "Name": "LiveCodingToolset", "Enabled": true },
-		{ "Name": "PerfToolset", "Enabled": true },
-		{ "Name": "WidgetStaticAnalysisToolset", "Enabled": true },
-		{ "Name": "PCGToolset", "Enabled": true },
-		{ "Name": "CommonUIToolset", "Enabled": true }
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "EnhancedInput",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayStateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "SmartObjects",
+			"Enabled": true
+		},
+		{
+			"Name": "PCG",
+			"Enabled": true
+		},
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true
+		},
+		{
+			"Name": "ModelContextProtocol",
+			"Enabled": true
+		},
+		{
+			"Name": "ToolsetRegistry",
+			"Enabled": true
+		},
+		{
+			"Name": "AIAssistant",
+			"Enabled": false
+		},
+		{
+			"Name": "UnrealCanvasAnnotations",
+			"Enabled": true
+		},
+		{
+			"Name": "UnrealCanvasGraph",
+			"Enabled": true
+		},
+		{
+			"Name": "UnrealCanvasBridge",
+			"Enabled": true
+		},
+		{
+			"Name": "MCPClientToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "AllToolsets",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "BlueprintToolsets",
+			"Enabled": true
+		},
+		{
+			"Name": "ConsoleToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "FileSystemToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "InputToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "NavMeshToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTreeToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "AIModuleToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "DataRegistryToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayTagsToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "ConfigSettingsToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "PluginToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "AutomationTestToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "LiveCodingToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "PerfToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "WidgetStaticAnalysisToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "PCGToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "CommonUIToolset",
+			"Enabled": true
+		}
 	]
 }

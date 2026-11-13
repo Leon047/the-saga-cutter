@@ -5,7 +5,105 @@
 #include "TSCBuilders.h"
 #include "TSCGameMode.h"
 
+#include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Misc/PackageName.h"
+
 using namespace TSC;
+
+namespace
+{
+	/** A Viking character imported into Content/Characters/<folder>: skeletal mesh + one AnimSequence per clip. */
+	struct FVikingModel
+	{
+		const TCHAR* Folder;
+		const TCHAR* Mesh;
+		const TCHAR* AnimPrefix;
+	};
+	const FVikingModel VikingMale{ TEXT("/Game/Characters/viking_male"), TEXT("Viking_Male"), TEXT("Viking_MaleCharacterArmature_") };
+	const FVikingModel VikingFemale{ TEXT("/Game/Characters/viking_female"), TEXT("Viking_Female"), TEXT("Viking_FemaleCharacterArmature_") };
+	/** The one lord (Torvald Shield-Bearer): horned helmet. */
+	const FVikingModel VikingLord{ TEXT("/Game/Characters/viking_lord"), TEXT("VikingHelmet"), TEXT("VikingHelmetCharacterArmature_") };
+
+	const TCHAR* VikingAnimNames[] = { TEXT("Idle"), TEXT("Walk"), TEXT("Run"), TEXT("Walk_Carry"), TEXT("Run_Carry"),
+		TEXT("SwordSlash"), TEXT("Shoot_OneHanded"), TEXT("Punch"), TEXT("PickUp"), TEXT("RecieveHit"), TEXT("Death") };
+	static_assert(UE_ARRAY_COUNT(VikingAnimNames) == (int32)ETSCAnim::Num, "One clip name per ETSCAnim");
+
+	/** Colour parameter of the imported FBX materials. */
+	const FName DiffuseParam(TEXT("DiffuseColor"));
+
+	// Tuning: the FBX faces +Y, units walk along +X.
+	constexpr float VikingYaw = -90.f;
+	/** Height of the figure in cm (named heroes are 12% taller), same as the old primitive figure. */
+	constexpr float VikingHeight = 120.f;
+	// Weapon meshes (Content/Weapons). Several candidates where the folder name may still change:
+	// the axe folder was created with a Cyrillic "А" (U+0410), the arrow folder is spelt "Errow".
+	const TCHAR* const WeaponAxe[] = { TEXT("/Game/Weapons/Axe/Axe_small.Axe_small"), TEXT("/Game/Weapons/Аxe/Axe_small.Axe_small") };
+	const TCHAR* const WeaponSword[] = { TEXT("/Game/Weapons/Sword/Sword.Sword") };
+	const TCHAR* const WeaponShield[] = { TEXT("/Game/Weapons/Shield/Shield_Round.Shield_Round") };
+	const TCHAR* const WeaponBow[] = { TEXT("/Game/Weapons/Bow/Bow_Wooden.Bow_Wooden") };
+	const TCHAR* const WeaponStaff[] = { TEXT("/Game/Weapons/Staff/Staff.Staff") };
+	const TCHAR* const WeaponArrow[] = { TEXT("/Game/Weapons/Arrow/Arrow.Arrow"), TEXT("/Game/Weapons/Errow/Arrow.Arrow") };
+
+	UStaticMesh* LoadFirstMesh(TArrayView<const TCHAR* const> Paths)
+	{
+		for (const TCHAR* Path : Paths)
+		{
+			// FindObject first so a missing candidate path does not log a load warning every spawn.
+			if (UStaticMesh* SM = FindObject<UStaticMesh>(nullptr, Path)) { return SM; }
+			if (FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(FString(Path))))
+			{
+				if (UStaticMesh* SM = LoadObject<UStaticMesh>(nullptr, Path)) { return SM; }
+			}
+		}
+		return nullptr;
+	}
+
+	/** Rotation that turns a mesh so its local LocalX axis lies on +X and LocalZ on +Z. */
+	FQuat AxesToXZ(const FVector& LocalX, const FVector& LocalZ)
+	{
+		return FRotationMatrix::MakeFromXZ(LocalX, LocalZ).ToQuat().Inverse();
+	}
+
+	/** Arrow mesh: tip at +Z (fletching at -Z); turned so the tip points along +X, the flight direction. */
+	const FQuat ArrowMeshRot = AxesToXZ(FVector(0.f, 0.f, 1.f), FVector(1.f, 0.f, 0.f));
+	/** Arrow length as a fraction of the figure height. */
+	constexpr float ArrowSize = 0.4f;
+}
+
+/**
+ * How a weapon mesh sits in a hand socket. Sockets on the Viking skeletons (made by script, editable in the
+ * Skeleton Editor) follow one convention: +Z = where the shaft / blade points, +X = edge / facing / shooting side.
+ * Each mesh says which of its local axes map onto those, where it is gripped, and how big it is.
+ */
+struct FTSCWeaponDef
+{
+	TArrayView<const TCHAR* const> Paths;
+	FName Socket;
+	FName FallbackBone;
+	/** Local axis of the mesh that goes to the socket's +X / +Z. */
+	FVector LocalX;
+	FVector LocalZ;
+	/** Grip point in mesh units (lands on the socket). */
+	FVector Grip;
+	/** Longest dimension as a fraction of the figure height (the imported meshes come in mixed scales). */
+	float Size;
+};
+
+namespace
+{
+	// Measured from the meshes: sword blade -Y, edges +/-X; axe head -Y, edge +X, origin right under the head;
+	// shield face (boss) -Y; bow limbs along Y, bending towards -X (the target side); staff up +Z.
+	const FTSCWeaponDef DefSword{ WeaponSword, TEXT("weapon_r"), TEXT("Fist_R"), FVector(1, 0, 0), FVector(0, -1, 0), FVector(0, 0.03f, 0), 0.55f };
+	const FTSCWeaponDef DefAxe{ WeaponAxe, TEXT("weapon_r"), TEXT("Fist_R"), FVector(1, 0, 0), FVector(0, -1, 0), FVector(0, 0.45f, 0), 0.45f };
+	const FTSCWeaponDef DefShield{ WeaponShield, TEXT("shield_l"), TEXT("Fist_L"), FVector(0, -1, 0), FVector(0, 0, 1), FVector::ZeroVector, 0.4f };
+	const FTSCWeaponDef DefBow{ WeaponBow, TEXT("bow_l"), TEXT("Fist_L"), FVector(-1, 0, 0), FVector(0, 1, 0), FVector::ZeroVector, 0.42f };
+	const FTSCWeaponDef DefStaff{ WeaponStaff, TEXT("staff_r"), TEXT("Fist_R"), FVector(1, 0, 0), FVector(0, 0, 1), FVector::ZeroVector, 0.5f };
+}
 
 void ATSCUnit::Init(ATSCGameMode* InGM, ETSCRole InRole, const FString& InName)
 {
@@ -88,6 +186,14 @@ void ATSCUnit::BuildFigure()
 	const bool bRaider = Role == ETSCRole::Raider;
 	const float S = bNamed ? 1.12f : 1.f;
 
+	if (BuildViking(Tunic))
+	{
+		bArmed = true;
+		SetArmed(bRaider || Role == ETSCRole::Shield);
+		return;
+	}
+
+	// Fallback (Viking character assets missing): figure made of primitives.
 	TunicPart = AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 40.f * S), FRotator::ZeroRotator, FVector(0.58f * S, 0.5f * S, 0.62f * S), Tunic, Body);
 	AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 36.f * S), FRotator::ZeroRotator, FVector(0.6f * S, 0.52f * S, 0.07f), Pal::TimberDark, Body); // belt
 	AddPart(ETSCShape::Sphere, FVector(0.f, 0.f, 86.f * S), FRotator::ZeroRotator, FVector(0.4f * S), Pal::Skin, Body);
@@ -139,11 +245,252 @@ void ATSCUnit::BuildFigure()
 	SetArmed(bRaider || Role == ETSCRole::Shield);
 }
 
+bool ATSCUnit::BuildViking(const FLinearColor& Tunic)
+{
+	// Torvald (the named shield-bearer) is the lord. Named heroes have a fixed sex (Sigrun the Healer is a woman),
+	// everyone else (workers, raiders) is a man or a woman at random.
+	const FVikingModel* Model = &VikingMale;
+	if (bNamed)
+	{
+		Model = Role == ETSCRole::Shield ? &VikingLord : Role == ETSCRole::Healer ? &VikingFemale : &VikingMale;
+	}
+	else if (FMath::RandBool())
+	{
+		Model = &VikingFemale;
+	}
+	auto LoadMesh = [](const FVikingModel& M)
+	{
+		return LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), M.Folder, M.Mesh, M.Mesh));
+	};
+	USkeletalMesh* SkMesh = LoadMesh(*Model);
+	if (!SkMesh && Model != &VikingMale)
+	{
+		Model = &VikingMale;
+		SkMesh = LoadMesh(*Model);
+	}
+	if (!SkMesh) { return false; }
+
+	const bool bRaider = Role == ETSCRole::Raider;
+	const float S = bNamed ? 1.12f : 1.f;
+
+	// Fit the imported mesh to the figure height, feet on the ground.
+	const FBox Box = SkMesh->GetImportedBounds().GetBox();
+	const float Scale = VikingHeight * S / FMath::Max(Box.Max.Z - Box.Min.Z, 1.f);
+
+	Mesh = NewObject<USkeletalMeshComponent>(this);
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetSkeletalMeshAsset(SkMesh);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetGenerateOverlapEvents(false);
+	Mesh->SetCanEverAffectNavigation(false);
+	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+	Mesh->SetupAttachment(Body);
+	Mesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -Box.Min.Z * Scale), FRotator(0.f, VikingYaw, 0.f));
+	Mesh->SetRelativeScale3D(FVector(Scale));
+	Mesh->RegisterComponent();
+	AddInstanceComponent(Mesh);
+
+	// Per-slot colours: "Main" is the tunic (role / job colour), raiders get black hair.
+	for (int32 I = 0; I < Mesh->GetNumMaterials(); ++I)
+	{
+		const UMaterialInterface* Src = Mesh->GetMaterial(I);
+		const FString SlotName = Src ? Src->GetName() : FString();
+		UMaterialInstanceDynamic* MID = Mesh->CreateDynamicMaterialInstance(I);
+		FLinearColor Col = MID ? MID->K2_GetVectorParameterValue(DiffuseParam) : FLinearColor::White;
+		if (SlotName == TEXT("Main")) { TunicSlot = I; Col = Tunic; }
+		else if (bRaider && SlotName == TEXT("Hair")) { Col = FLinearColor(0.05f, 0.04f, 0.03f); }
+		MeshMIDs.Add(MID);
+		MeshCols.Add(Col);
+	}
+
+	Anims.SetNum((int32)ETSCAnim::Num);
+	for (int32 I = 0; I < (int32)ETSCAnim::Num; ++I)
+	{
+		const FString Name = FString(Model->AnimPrefix) + VikingAnimNames[I];
+		Anims[I] = LoadObject<UAnimSequence>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), Model->Folder, *Name, *Name));
+	}
+	const float IdleLen = PlayAnim(ETSCAnim::Idle, true);
+	if (IdleLen > 0.f)
+	{
+		// Desync idle loops so a crowd does not breathe in unison.
+		Mesh->SetPosition(FMath::Fmod(AnimPhase, IdleLen), false);
+	}
+
+	// Weapons (Content/Weapons). Hunter: bow, healer: staff (always held). Fighters: shield + sword or axe, picked at
+	// random; the lord (Torvald) and Ulf the Woodcutter always carry the axe. Shield and blade show only when armed.
+	if (Role == ETSCRole::Hunter)
+	{
+		AddWeapon(DefBow, false);
+	}
+	else if (Role == ETSCRole::Healer)
+	{
+		AddWeapon(DefStaff, false);
+	}
+	else
+	{
+		const bool bAxe = Role == ETSCRole::Shield || Role == ETSCRole::Woodcutter || FMath::RandBool();
+		if (!bAxe || !AddWeapon(DefAxe, true))
+		{
+			AddWeapon(DefSword, true);
+		}
+		AddWeapon(DefShield, true);
+	}
+	return true;
+}
+
+UStaticMeshComponent* ATSCUnit::AddWeapon(const FTSCWeaponDef& Def, bool bArmedOnly)
+{
+	UStaticMesh* SM = LoadFirstMesh(Def.Paths);
+	if (!SM || !Mesh) { return nullptr; }
+	const FName Socket = Mesh->DoesSocketExist(Def.Socket) ? Def.Socket : Def.FallbackBone;
+
+	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this);
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetStaticMesh(SM);
+	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Comp->SetGenerateOverlapEvents(false);
+	Comp->SetCanEverAffectNavigation(false);
+	Comp->SetupAttachment(Mesh, Socket);
+	Comp->RegisterComponent();
+	AddInstanceComponent(Comp);
+
+	// Orient by the socket convention, size it against the figure, and put the grip point on the socket.
+	// The skeleton bones carry a x100 scale, so sizes are set in world space, offsets divided by the socket scale.
+	const float MeshLen = FMath::Max(SM->GetBoundingBox().GetSize().GetMax(), KINDA_SMALL_NUMBER);
+	const float WorldScale = Def.Size * VikingHeight * (bNamed ? 1.12f : 1.f) / MeshLen;
+	const float SocketScale = FMath::Max(Mesh->GetSocketTransform(Socket, RTS_World).GetScale3D().GetMax(), KINDA_SMALL_NUMBER);
+	const FQuat Rot = AxesToXZ(Def.LocalX, Def.LocalZ);
+	Comp->SetRelativeRotation(Rot);
+	Comp->SetWorldScale3D(FVector(WorldScale));
+	Comp->SetRelativeLocation(-Rot.RotateVector(Def.Grip) * WorldScale / SocketScale);
+	AddTintedMaterials(Comp);
+	if (bArmedOnly)
+	{
+		// Visible for now; BuildFigure's SetArmed() hides it for unarmed units.
+		ArmedItems.Add(Comp);
+	}
+	else
+	{
+		HeldItem = Comp;
+	}
+	return Comp;
+}
+
+void ATSCUnit::AddTintedMaterials(UMeshComponent* Comp)
+{
+	// Each slot gets a MID so Refresh can blend its colour to the Ashen look.
+	for (int32 I = 0; I < Comp->GetNumMaterials(); ++I)
+	{
+		UMaterialInstanceDynamic* MID = Comp->CreateDynamicMaterialInstance(I);
+		MeshMIDs.Add(MID);
+		MeshCols.Add(MID ? MID->K2_GetVectorParameterValue(DiffuseParam) : FLinearColor::White);
+	}
+}
+
+bool ATSCUnit::FireArrow(const FVector& To)
+{
+	if (!Mesh) { return false; }
+	UStaticMesh* SM = LoadFirstMesh(WeaponArrow);
+	if (!SM) { return false; }
+
+	// Reuse a finished arrow, otherwise make a new one (world-space, not attached to the moving hunter).
+	int32 Idx = Arrows.IndexOfByPredicate([](const FTSCArrowFlight& A) { return A.T >= 1.f; });
+	if (Idx == INDEX_NONE)
+	{
+		UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this);
+		Comp->SetMobility(EComponentMobility::Movable);
+		Comp->SetStaticMesh(SM);
+		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetGenerateOverlapEvents(false);
+		Comp->SetCanEverAffectNavigation(false);
+		Comp->SetupAttachment(Root);
+		Comp->SetUsingAbsoluteLocation(true);
+		Comp->SetUsingAbsoluteRotation(true);
+		Comp->SetUsingAbsoluteScale(true);
+		Comp->RegisterComponent();
+		AddInstanceComponent(Comp);
+		AddTintedMaterials(Comp);
+		Refresh();
+		ArrowComps.Add(Comp);
+		Idx = Arrows.AddDefaulted();
+	}
+	FTSCArrowFlight& A = Arrows[Idx];
+	A.From = HeldItem ? HeldItem->GetComponentLocation() : GetActorLocation() + FVector(0.f, 0.f, 90.f);
+	A.To = To;
+	A.T = 0.f;
+	A.Dur = FMath::Clamp(FVector::Dist(A.From, To) / 2400.f, 0.15f, 0.45f);
+	UStaticMeshComponent* Comp = ArrowComps[Idx];
+	Comp->SetWorldScale3D(FVector(ArrowSize * VikingHeight / FMath::Max(SM->GetBoundingBox().GetSize().GetMax(), KINDA_SMALL_NUMBER)));
+	Comp->SetVisibility(true);
+	UpdateArrows(0.f);
+	return true;
+}
+
+void ATSCUnit::UpdateArrows(float Dt)
+{
+	for (int32 I = 0; I < Arrows.Num(); ++I)
+	{
+		FTSCArrowFlight& A = Arrows[I];
+		UStaticMeshComponent* Comp = ArrowComps[I];
+		if (A.T >= 1.f || !Comp) { continue; }
+		A.T = FMath::Min(1.f, A.T + Dt / A.Dur);
+		if (A.T >= 1.f)
+		{
+			Comp->SetVisibility(false);
+			continue;
+		}
+		// Shallow arc; the arrow points along its flight direction.
+		const float Arc = FVector::Dist(A.From, A.To) * 0.06f;
+		const FVector P = FMath::Lerp(A.From, A.To, A.T) + FVector(0.f, 0.f, Arc * 4.f * A.T * (1.f - A.T));
+		const FVector Dir = (A.To - A.From) + FVector(0.f, 0.f, Arc * 4.f * (1.f - 2.f * A.T));
+		Comp->SetWorldLocationAndRotation(P, Dir.Rotation().Quaternion() * ArrowMeshRot);
+	}
+}
+
+float ATSCUnit::PlayAnim(ETSCAnim Id, bool bLoop, float Rate)
+{
+	UAnimSequence* A = Anims.IsValidIndex((int32)Id) ? Anims[(int32)Id].Get() : nullptr;
+	if (!Mesh || !A) { return 0.f; }
+	if (A != CurAnim || !bLoop)
+	{
+		CurAnim = A;
+		Mesh->PlayAnimation(A, bLoop);
+	}
+	Mesh->SetPlayRate(Rate);
+	return A->GetPlayLength();
+}
+
+void ATSCUnit::StartSwing(float ArmTime, float Window, ETSCAnim Clip)
+{
+	SwingTimer = ArmTime;
+	if (!Mesh) { return; }
+	const UAnimSequence* A = Anims.IsValidIndex((int32)Clip) ? Anims[(int32)Clip].Get() : nullptr;
+	if (!A) { return; }
+	const float Len = A->GetPlayLength();
+	const float Rate = Window > 0.f ? FMath::Max(1.f, Len / Window) : 1.f;
+	PlayAnim(Clip, false, Rate);
+	OneShotTimer = Len / Rate;
+}
+
+void ATSCUnit::Refresh()
+{
+	Super::Refresh();
+	const float A = FMath::SmoothStep(0.f, 1.f, SagaAlpha);
+	for (int32 I = 0; I < MeshMIDs.Num(); ++I)
+	{
+		if (MeshMIDs[I])
+		{
+			MeshMIDs[I]->SetVectorParameterValue(DiffuseParam, FMath::Lerp(MeshCols[I], Ashify(MeshCols[I]), A));
+		}
+	}
+}
+
 void ATSCUnit::SetArmed(bool bInArmed)
 {
 	if (bArmed == bInArmed) { return; }
 	bArmed = bInArmed;
 	for (int32 I : ArmedParts) { SetShown(I, bArmed); }
+	for (UStaticMeshComponent* C : ArmedItems) { if (C) { C->SetVisibility(bArmed); } }
 	for (int32 I : UnarmedParts) { SetShown(I, !bArmed); }
 	Refresh();
 }
@@ -157,6 +504,12 @@ void ATSCUnit::SetJob(ETSCJob InJob)
 			: Job == ETSCJob::Food ? FLinearColor(0.17f, 0.30f, 0.09f) : FLinearColor(0.20f, 0.22f, 0.27f);
 		Parts[TunicPart].LCol = C;
 		Parts[TunicPart].ACol = C;
+		Refresh();
+	}
+	if (Role == ETSCRole::Worker && MeshCols.IsValidIndex(TunicSlot))
+	{
+		MeshCols[TunicSlot] = Job == ETSCJob::Wood ? FLinearColor(0.36f, 0.17f, 0.07f)
+			: Job == ETSCJob::Food ? FLinearColor(0.17f, 0.30f, 0.09f) : FLinearColor(0.20f, 0.22f, 0.27f);
 		Refresh();
 	}
 }
@@ -219,6 +572,10 @@ void ATSCUnit::Hurt(float Amount)
 	{
 		Kill();
 	}
+	else if (Mesh && OneShotTimer <= 0.f && !bDowned)
+	{
+		OneShotTimer = PlayAnim(ETSCAnim::Hit, false);
+	}
 }
 
 void ATSCUnit::Kill()
@@ -228,6 +585,11 @@ void ATSCUnit::Kill()
 	bDead = true;
 	DeathTimer = 0.f;
 	Need = ETSCNeed::None;
+	if (Mesh)
+	{
+		OneShotTimer = 0.f;
+		PlayAnim(ETSCAnim::Death, false);
+	}
 	if (GM) { GM->OnUnitDied(this); }
 }
 
@@ -289,6 +651,7 @@ bool ATSCUnit::StepToward(const FVector& Dest, float Dt, float StopDist)
 
 void ATSCUnit::Sim(float Dt)
 {
+	UpdateArrows(Dt); // arrows already in the air keep flying even if the hunter falls
 	if (bGone) { return; }
 	if (bDead)
 	{
@@ -299,7 +662,10 @@ void ATSCUnit::Sim(float Dt)
 		}
 		else
 		{
-			Body->SetRelativeRotation(FRotator(0.f, 0.f, FMath::Min(DeathTimer * 260.f, 90.f)));
+			if (!Mesh) // the Viking mesh falls with its Death clip
+			{
+				Body->SetRelativeRotation(FRotator(0.f, 0.f, FMath::Min(DeathTimer * 260.f, 90.f)));
+			}
 			if (DeathTimer > 5.f)
 			{
 				Body->SetRelativeLocation(FVector(0.f, 0.f, -(DeathTimer - 5.f) * 30.f));
@@ -320,7 +686,16 @@ void ATSCUnit::Sim(float Dt)
 
 	if (bDowned)
 	{
-		Body->SetRelativeRotation(FRotator(0.f, 0.f, 82.f));
+		if (!Mesh)
+		{
+			Body->SetRelativeRotation(FRotator(0.f, 0.f, 82.f));
+		}
+		else if (Anims[(int32)ETSCAnim::Death] && CurAnim != Anims[(int32)ETSCAnim::Death])
+		{
+			// Lying down: the Death clip holds its last (lying) pose.
+			OneShotTimer = 0.f;
+			PlayAnim(ETSCAnim::Death, false);
+		}
 		return;
 	}
 	Body->SetRelativeRotation(FRotator::ZeroRotator);
@@ -353,11 +728,16 @@ void ATSCUnit::Sim(float Dt)
 				if (AttackTimer <= 0.f)
 				{
 					AttackTimer = AttackInterval * FMath::FRandRange(0.9f, 1.1f);
-					SwingTimer = 0.35f;
+					StartSwing(0.35f, AttackTimer, AttackRange > 300.f ? ETSCAnim::Shoot : Role == ETSCRole::Healer ? ETSCAnim::Punch : ETSCAnim::Slash);
 					T->Hurt(Damage);
 					if (AttackRange > 300.f)
 					{
-						GM->AddTracer(GetActorLocation() + FVector(0.f, 0.f, 90.f), T->GetActorLocation() + FVector(0.f, 0.f, T->Height * 0.6f), FLinearColor(1.f, 0.9f, 0.6f));
+						// An arrow flies from the bow; the HUD tracer line is the fallback without the Viking / arrow assets.
+						const FVector Hit = T->GetActorLocation() + FVector(0.f, 0.f, T->Height * 0.6f);
+						if (!FireArrow(Hit))
+						{
+							GM->AddTracer(GetActorLocation() + FVector(0.f, 0.f, 90.f), Hit, FLinearColor(1.f, 0.9f, 0.6f));
+						}
 					}
 				}
 			}
@@ -375,7 +755,12 @@ void ATSCUnit::Sim(float Dt)
 		if (WorkTimer > 0.f)
 		{
 			WorkTimer -= Dt;
-			if (WorkPhase == 0 && SwingTimer <= 0.f) { SwingTimer = 0.6f; }
+			if (WorkPhase == 0 && SwingTimer <= 0.f && OneShotTimer <= 0.f)
+			{
+				// Chopping (axe) or gathering (picking up).
+				const bool bChop = Role == ETSCRole::Woodcutter || (Role == ETSCRole::Worker && Job == ETSCJob::Wood);
+				StartSwing(0.6f, 0.f, bChop ? ETSCAnim::Slash : ETSCAnim::PickUp);
+			}
 			if (WorkTimer <= 0.f) { WorkPhase = 1 - WorkPhase; }
 		}
 		else if (StepToward(Dest, Dt, 40.f))
@@ -417,7 +802,7 @@ void ATSCUnit::Sim(float Dt)
 			if (Struct != ETSCStructure::None && AttackTimer <= 0.f)
 			{
 				AttackTimer = AttackInterval;
-				SwingTimer = 0.35f;
+				StartSwing(0.35f, AttackInterval, ETSCAnim::Slash);
 				GM->DamageStructure(Struct, Damage * 0.3f);
 			}
 		}
@@ -449,6 +834,23 @@ void ATSCUnit::Animate(float Dt, bool bMoving)
 		{
 			Body->SetRelativeLocation(FVector(40.f * FMath::Sin(SwingTimer / 0.35f * PI), 0.f, 0.f));
 		}
+		return;
+	}
+
+	if (Mesh)
+	{
+		// Skinned Viking: one-shot clips (attack, work, hit) play out unless the unit starts moving, then locomotion.
+		if (bMoving) { OneShotTimer = 0.f; }
+		OneShotTimer -= Dt;
+		if (OneShotTimer > 0.f) { return; }
+		if (!bMoving)
+		{
+			PlayAnim(ETSCAnim::Idle, true);
+			return;
+		}
+		const bool bRun = Target.IsValid() || Order == ETSCOrder::Assault || Order == ETSCOrder::Shelter;
+		const bool bCarry = Order == ETSCOrder::Work && WorkPhase == 1 && Role != ETSCRole::Hunter;
+		PlayAnim(bCarry ? (bRun ? ETSCAnim::RunCarry : ETSCAnim::WalkCarry) : (bRun ? ETSCAnim::Run : ETSCAnim::Walk), true);
 		return;
 	}
 
