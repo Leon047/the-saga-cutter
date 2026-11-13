@@ -6,6 +6,7 @@
 #include "Components/SceneComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "TSCGameMode.h"
 
 ATSCColonyCameraPawn::ATSCColonyCameraPawn()
 {
@@ -32,9 +33,26 @@ ATSCColonyCameraPawn::ATSCColonyCameraPawn()
 	DesiredArmLength = ReferenceArmLength;
 }
 
+void ATSCColonyCameraPawn::SetView(const FVector& Loc, float ArmLength)
+{
+	SetActorLocation(Loc);
+	DesiredArmLength = FMath::Clamp(ArmLength, MinArmLength, MaxArmLength);
+	SpringArm->TargetArmLength = DesiredArmLength;
+}
+
 void ATSCColonyCameraPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	const ATSCGameMode* GM = GetWorld()->GetAuthGameMode<ATSCGameMode>();
+	if (GM && GM->IsFirstCutFramed())
+	{
+		PendingPan = FVector2D::ZeroVector;
+		PendingDrag = FVector2D::ZeroVector;
+		PendingZoom = 0.f;
+		PendingRotate = 0.f;
+		return;
+	}
 
 	// Pan speed grows with zoom so the camera feels the same at every height.
 	const float ZoomScale = SpringArm->TargetArmLength / FMath::Max(ReferenceArmLength, 1.f);

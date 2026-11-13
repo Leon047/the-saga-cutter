@@ -9,12 +9,15 @@
 #include "TSCGameMode.generated.h"
 
 class ATSCPrimActor;
+class UAudioComponent;
+class USoundBase;
 class UDirectionalLightComponent;
 class UExponentialHeightFogComponent;
 class UPostProcessComponent;
 class USkyLightComponent;
 
 enum class ETSCPhase : uint8 { Title, Day, Night, Epilogue };
+enum class ETSCDayOnePrompt : uint8 { None, Wood, Food, Build, Cut };
 
 /** Editable regions of the map; every object in a region has a Living and an Ashen version. */
 namespace TSCRegion
@@ -100,6 +103,22 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Saga")
 	float EconomyInterval = 5.f;
 
+	// ----- music (Sound Cues pick a random take on each play) ---------------------------------------------------------
+	/** Title screen, and the epilogue after the victory sting or a fallen hall. */
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> MenuMusic;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> DayMusic;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> NightMusic;
+	/** One-shot sting when the hall survives the night. */
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> VictoryMusic;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	float MusicVolume = 0.6f;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	float MusicFadeTime = 1.5f;
+
 	// ----- state read by the HUD --------------------------------------------------------------------------------------
 	ETSCPhase Phase = ETSCPhase::Title;
 	int32 Day = 1;
@@ -146,6 +165,14 @@ public:
 
 	TArray<FTSCPlot> Plots;
 
+	// ----- prologue behind the title screen (read by the HUD) ---------------------------------------------------------
+	/** True while the landfall story plays behind the title. */
+	bool bPrologue = false;
+	FString ProCaption;
+	float ProCaptionAlpha = 0.f;
+	/** 0..1 black fade over the whole screen (loop restart). */
+	float ProFade = 0.f;
+
 	// ----- actions from the HUD ---------------------------------------------------------------------------------------
 	void StartGame();
 	void RestartGame();
@@ -158,6 +185,8 @@ public:
 	void PressCut();
 	void SelectTake(int32 Take) { SelectedTake = Take; }
 	void ConfirmCut();
+	ETSCDayOnePrompt GetDayOnePrompt() const;
+	bool IsFirstCutFramed() const;
 	void ToggleSpeed();
 	bool IsFrozen() const { return bCutOpen || TransitionTimer > 0.f || Phase == ETSCPhase::Title || Phase == ETSCPhase::Epilogue; }
 	FString PhaseLabel() const;
@@ -220,6 +249,12 @@ private:
 	void SetGate(bool bClosed);
 	void ShowBanner(const FString& Text, float Time);
 	void AutoPlay(float Dt);
+	/** Cross-fades to Sound; does nothing if it is already the current track. */
+	void PlayMusic(USoundBase* Sound);
+
+	UPROPERTY() TObjectPtr<UAudioComponent> MusicComp;
+	UPROPERTY() TObjectPtr<USoundBase> CurrentMusic;
+	FTimerHandle MusicTimer;
 
 	// scenes
 	void DefineScenes();
@@ -229,6 +264,36 @@ private:
 	void ApplyAshen(int32 Idx);
 	void FinishScene(int32 Idx);
 	void TransitionRegion(int32 Region, const FVector& Origin);
+
+	// prologue: the finished world is rewound (hidden, unbuilt, forested) and played forward behind the title
+	void CollectLevelProps();
+	void BuildPrologueExtras();
+	void StartPrologue();
+	void SimPrologue(float Dt);
+	void EndPrologue();
+	void ResetVillagers();
+	void SetCameraView(const FVector& Loc, float Arm);
+
+	UPROPERTY() TObjectPtr<ATSCPrimActor> Longship;
+	FVector ShipMooring = FVector::ZeroVector;
+	UPROPERTY() TObjectPtr<ATSCPrimActor> GroundBase;
+	int32 MeadowPart = -1;
+	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> WallSegs;
+	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProBuildings;
+	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProDressing;
+	UPROPERTY() TArray<TObjectPtr<AActor>> ProLevelProps;
+	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProTrees;
+	TArray<float> ProTreeFell;      // time each tree starts to fall
+	TArray<float> ProTreeYaw;       // direction it falls in
+	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> ProWatchers;
+	TArray<FVector> UnitHome;       // spawn position of Units[i] at the end of BuildWorld
+	int32 NumHomeUnits = 0;
+	float ProTime = 0.f;
+	float ProDusk = 0.f;
+	int32 ProLanded = 0;
+	int32 ProStage = 0;
+	FVector ProCamLoc = FVector::ZeroVector;
+	float ProCamArm = 16500.f;
 
 	TArray<uint8> Blocked;
 	UPROPERTY()
@@ -296,6 +361,11 @@ private:
 
 	// autoplay (testing)
 	bool bAuto = false;
+	bool bDayOneOnboarding = false;
+	bool bAssignedWoodOnDayOne = false;
+	bool bAssignedFoodOnDayOne = false;
+	bool bTriedFirstCut = false;
+	bool bFramingFirstCut = false;
 	FString AutoTakes;
 	FString AutoBuild;
 

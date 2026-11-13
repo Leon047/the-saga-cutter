@@ -53,7 +53,9 @@ namespace TSC
 	/** Crops gets the part indices of the plants, so the boar can trample them. */
 	void BuildGarden(ATSCPrimActor* A, int32 W, int32 H, TArray<int32>& Crops);
 	void BuildDock(ATSCPrimActor* A, int32 W, int32 H, TArray<int32>& Crates);
-	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed);
+	/** One straight palisade segment along local Y from 0 to Len, supports facing local +X: an SM_WoodenFence section
+	 *  (primitive log tiles without the mesh) and the Ashen stone footing. */
+	void BuildPalisadeSegment(ATSCPrimActor* A, float Len, int32 Seed);
 	/** Two cells high (in Y). Pivots[0] and Pivots[1] are the door leaves. */
 	void BuildGate(ATSCPrimActor* A, TArray<USceneComponent*>& Pivots);
 	void BuildTree(ATSCPrimActor* A, int32 Seed, bool bWithStump);

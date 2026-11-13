@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "TSCPrimActor.generated.h"
 
+class UStaticMesh;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UPointLightComponent;
@@ -43,7 +44,7 @@ struct FTSCLight
 /**
  * Base for every object in the game: a bag of engine primitives (cube, sphere, cylinder, cone, plane) with flat
  * colours. Each part has a Living Saga and an Ashen Saga look; SagaAlpha blends between them (0 = Living, 1 = Ashen).
- * No custom meshes anywhere.
+ * Imported meshes (AddMeshPart) keep their own material and only take part in visibility, saga and build scaling.
  */
 UCLASS()
 class ATSCPrimActor : public AActor
@@ -57,6 +58,8 @@ public:
 		USceneComponent* Parent = nullptr);
 	int32 AddPartQ(ETSCShape Shape, const FVector& Loc, const FQuat& Rot, const FVector& Scale, const FLinearColor& Col,
 		USceneComponent* Parent = nullptr);
+	/** An imported static mesh with its own materials (no flat colour, so SetAshen/SetGlow have no effect). */
+	int32 AddMeshPart(UStaticMesh* Mesh, const FVector& Loc, const FRotator& Rot, const FVector& Scale, USceneComponent* Parent = nullptr);
 	USceneComponent* AddPivot(const FVector& Loc, USceneComponent* Parent = nullptr);
 	void AddLight(const FVector& Loc, const FLinearColor& Col, float LivingIntensity, float AshenIntensity, float Radius);
 

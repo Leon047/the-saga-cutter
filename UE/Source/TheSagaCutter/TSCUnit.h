@@ -62,6 +62,8 @@ public:
 	void Teleport(const FVector& Pos);
 	FVector Loc2D() const { FVector L = GetActorLocation(); L.Z = 0.f; return L; }
 	bool AtHoldPos() const;
+	/** Scripted figures that are not simulated: only the idle animation. */
+	void Idle(float Dt) { Animate(Dt, false); }
 
 	virtual void Refresh() override;
 

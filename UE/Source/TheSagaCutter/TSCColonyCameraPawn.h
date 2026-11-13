@@ -31,6 +31,8 @@ public:
 	void AddRotateInput(float Axis) { PendingRotate += Axis; }
 	/** Raw mouse delta while middle-mouse dragging ("grab the ground"). */
 	void AddDragInput(const FVector2D& MouseDelta) { PendingDrag += MouseDelta; }
+	/** Scripted camera (title prologue): place the focus point and set the zoom at once. */
+	void SetView(const FVector& Loc, float ArmLength);
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")

@@ -2,6 +2,7 @@
 
 #include "TSCBuilders.h"
 
+#include "Engine/StaticMesh.h"
 #include "TSCPrimActor.h"
 
 namespace TSC
@@ -369,26 +370,107 @@ namespace TSC
 		A->AddLight(FVector(W * CELL, 0.f, 170.f), Pal::Fire, 3.f, 0.f, 600.f);
 	}
 
-	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed)
+	void BuildPalisadeSegment(ATSCPrimActor* A, float Len, int32 Seed)
 	{
-		// A row of sharpened log tiles along the west edge of the cell.
-		for (int32 I = 0; I < 3; ++I)
+		static UStaticMesh* Log = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenFence/SM_WoodenFence.SM_WoodenFence"));
+		if (Log)
 		{
-			const float Y = (I + 0.5f) * CELL / 3.f;
-			const float H = 215.f + 26.f * ((Seed * 3 + I * 5) % 4);
-			const FLinearColor Col = Pal::Timber * (0.75f + 0.12f * ((Seed + I * 2) % 4));
-			A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H * 0.5f), FRotator::ZeroRotator, FVector(0.1f, 0.64f, H / 100.f), Col);
-			A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H), FRotator(0.f, 0.f, 45.f), FVector(0.1f, 0.45f, 0.45f), Col * 0.8f);
+			// The section runs 311 cm along local -Y from its pivot, with its thickness centred at local x = 15.5.
+			// Turn it around so the supports face into the base while keeping the logs on the wall line. Every other
+			// section is mirrored, and each overlaps its neighbours a little to close the joints of the curve.
+			const float Sz = 0.92f + 0.06f * ((Seed * 7) % 4);
+			const bool bMirror = (Seed % 2) != 0;
+			const float Width = Len * 1.04f;
+			const float StartY = -Len * 0.02f + (bMirror ? Width : 0.f);
+			A->AddMeshPart(Log, FVector(15.5f, StartY, 0.f), FRotator(0.f, 180.f, 0.f), FVector(1.f, (bMirror ? -Width : Width) / 311.f, Sz));
+		}
+		else
+		{
+			// A row of sharpened log tiles.
+			const int32 N = FMath::Max(1, FMath::RoundToInt(Len / 67.f));
+			for (int32 I = 0; I < N; ++I)
+			{
+				const float Y = (I + 0.5f) * Len / N;
+				const float H = 215.f + 26.f * ((Seed * 3 + I * 5) % 4);
+				const FLinearColor Col = Pal::Timber * (0.75f + 0.12f * ((Seed + I * 2) % 4));
+				A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H * 0.5f), FRotator::ZeroRotator, FVector(0.1f, 0.96f * Len / N / 100.f, H / 100.f), Col);
+				A->AddPart(ETSCShape::Cube, FVector(0.f, Y, H), FRotator(0.f, 0.f, 45.f), FVector(0.1f, 0.45f, 0.45f), Col * 0.8f);
+			}
 		}
 		// The Ashen Saga rebuilt its wall on a stone footing: stronger fortifications.
-		const int32 Base = A->AddPart(ETSCShape::Cube, FVector(-6.f, CELL * 0.5f, 45.f), FRotator::ZeroRotator, FVector(0.3f, 2.f, 0.9f), Pal::Stone);
+		const int32 Base = A->AddPart(ETSCShape::Cube, FVector(-6.f, Len * 0.5f, 45.f), FRotator::ZeroRotator, FVector(0.3f, Len / 100.f, 0.9f), Pal::Stone);
 		A->SetAshen(Base, Pal::StoneDark * 1.3f);
 		A->SetVis(Base, ETSCVis::AshenOnly);
 	}
 
 	void BuildGate(ATSCPrimActor* A, TArray<USceneComponent*>& Pivots)
 	{
-		// Posts, lintel, two door leaves hinged on the posts.
+		static UStaticMesh* Frame = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_Frame.SM_WoodenGate_Frame"));
+		static UStaticMesh* Door = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_DoorPlain.SM_WoodenGate_DoorPlain"));
+		if (Frame && Door)
+		{
+			// Frame: 783 cm wide along local +Y, scaled to 0.6 (470 cm) and centred on the 400 cm opening, so its
+			// posts stand just outside the hinges.
+			const float FS = 0.6f;
+			const float FrameY0 = CELL - 783.f * FS * 0.5f;
+			A->AddMeshPart(Frame, FVector(0.f, FrameY0, 0.f), FRotator::ZeroRotator, FVector(FS));
+			// Doors: 300 cm wide along local +Y from the hinge, thickness centred at local x = 16. Both leaves are
+			// turned 180 degrees; the first is also mirrored so each opens from its own post. The plain door mesh
+			// removes the original diagonal braces on the forest-facing side.
+			const FVector DS(0.75f, CELL / 300.f, 0.62f);
+			const float FaceX = 38.f * DS.X + 3.f; // base-side face of the door
+			// Othala rune of heavy timber beams across both leaves (gate space: y 0..400, z = height). Diamond on top, its
+			// lower sides crossing at the seam into two legs. Every beam ends at the seam, so each half swings
+			// with its own leaf.
+			const FVector2D RTop(CELL, 265.f), RLeft(90.f, 175.f), RCross(CELL, 85.f), RFoot(127.f, 25.f);
+			const FVector2D Sticks[3][2] = { { RTop, RLeft }, { RLeft, RCross }, { RCross, RFoot } };
+			static UStaticMesh* StickMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_GateRuneBeam.SM_GateRuneBeam"));
+			for (int32 I = 0; I < 2; ++I)
+			{
+				USceneComponent* Pivot = A->AddPivot(FVector(0.f, I == 0 ? 0.f : 2.f * CELL, 0.f));
+				A->AddMeshPart(Door, FVector(16.f * DS.X, 0.f, 0.f), FRotator(0.f, 180.f, 0.f), I == 0 ? FVector(DS.X, -DS.Y, DS.Z) : DS, Pivot);
+				for (int32 Segment = 0; Segment < 3; ++Segment)
+				{
+					const FVector2D* S = Sticks[Segment];
+					// Each beam has a rough square-cut end and is trimmed to its own side of the door seam.
+					const FString MiterPath = FString::Printf(TEXT("/Game/Props/WoodenGate/SM_RuneBeam%02d.SM_RuneBeam%02d"), I * 3 + Segment, I * 3 + Segment);
+					if (UStaticMesh* MiterBeam = LoadObject<UStaticMesh>(nullptr, *MiterPath))
+					{
+						A->AddMeshPart(MiterBeam, FVector(FaceX + 7.f, 0.f, 0.f), FRotator::ZeroRotator, FVector::OneVector, Pivot);
+						continue;
+					}
+					// Mirror the left half onto the right leaf, then express it relative to the leaf's hinge.
+					const FVector2D P0 = I == 0 ? S[0] : FVector2D(2.f * CELL - S[0].X, S[0].Y);
+					const FVector2D P1 = I == 0 ? S[1] : FVector2D(2.f * CELL - S[1].X, S[1].Y);
+					const FVector2D D = P1 - P0;
+					const FVector2D Mid = (P0 + P1) * 0.5f - FVector2D(I == 0 ? 0.f : 2.f * CELL, 0.f);
+					if (StickMesh)
+					{
+						// Extracted gate-frame beam: 420 cm along local -Z, with an approximately 60 cm square
+						// cross-section. Start before P0 so the beams overlap at the corners.
+						const FVector2D Dir = D.GetSafeNormal();
+						const FVector2D Start = P0 - Dir * 7.f - FVector2D(I == 0 ? 0.f : 2.f * CELL, 0.f);
+						const FQuat Rot(FVector::ForwardVector, FMath::Atan2(Dir.X, -Dir.Y));
+						A->AddMeshPart(StickMesh, FVector(FaceX + 7.f, Start.X, Start.Y), Rot.Rotator(), FVector(0.5f, 0.5f, (D.Size() + 14.f) / 420.f), Pivot);
+					}
+					else
+					{
+						const FQuat Rot(FVector::ForwardVector, FMath::Atan2(D.Y, D.X));
+						const int32 Stick = A->AddPartQ(ETSCShape::Cube, FVector(FaceX + 6.f, Mid.X, Mid.Y), Rot, FVector(0.24f, (D.Size() + 14.f) / 100.f, 0.34f),
+							Pal::TimberDark * 0.8f, Pivot);
+						A->SetAshen(Stick, Pal::Char);
+					}
+				}
+				Pivots.Add(Pivot);
+				// Torch on top of each post.
+				const float PostY = I == 0 ? FrameY0 + 12.f : 2.f * CELL - FrameY0 - 12.f;
+				const int32 Flame = A->AddPart(ETSCShape::Sphere, FVector(30.f, PostY, 340.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 0.36f), Pal::Fire);
+				A->SetGlow(Flame, FLinearColor(16.f, 6.f, 0.8f), FLinearColor(10.f, 3.f, 0.3f));
+				A->AddLight(FVector(60.f, PostY, 330.f), Pal::Fire, 5.f, 4.f, 800.f);
+			}
+			return;
+		}
+		// Fallback without the gate meshes: posts, lintel, two door leaves hinged on the posts.
 		Post(A, 0.f, 0.f, 0.f, 330.f, Pal::TimberDark, 0.3f);
 		Post(A, 0.f, 2.f * CELL, 0.f, 330.f, Pal::TimberDark, 0.3f);
 		A->AddPart(ETSCShape::Cube, FVector(0.f, CELL, 318.f), FRotator::ZeroRotator, FVector(0.24f, 4.4f, 0.26f), Pal::TimberDark);
@@ -413,15 +495,44 @@ namespace TSC
 	{
 		FRandomStream R(Seed * 7919 + 13);
 		const FLinearColor Green = Pal::Spruce * R.FRandRange(0.75f, 1.35f);
-		const int32 Trunk = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 70.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 1.4f), Pal::TimberDark * 1.2f);
-		A->SetVis(Trunk, ETSCVis::LivingOnly);
-		const float Z[3] = { 170.f, 262.f, 340.f };
-		const float S[3] = { 1.55f, 1.2f, 0.82f };
-		for (int32 I = 0; I < 3; ++I)
+		// The imported pine (12 m tall, pivot at the base) scaled to the old primitive spruce height (~4.8 m).
+		static const TCHAR* const PinePaths[] = {
+			TEXT("/Game/Trees/Pine/SM_PineTree.SM_PineTree"),
+			TEXT("/Game/Trees/Pine2/SM_PineTree2.SM_PineTree2"),
+			TEXT("/Game/Trees/Pine3/SM_PineTree3.SM_PineTree3"),
+		};
+		static const TArray<UStaticMesh*> Pines = []
 		{
-			const int32 C = A->AddPart(ETSCShape::Cone, FVector(0.f, 0.f, Z[I]), FRotator::ZeroRotator, FVector(S[I], S[I], 1.5f - I * 0.15f), Green * (1.f + I * 0.18f));
-			A->SetAshen(C, Pal::Char);
-			A->SetVis(C, ETSCVis::LivingOnly);
+			TArray<UStaticMesh*> Loaded;
+			for (const TCHAR* Path : PinePaths)
+			{
+				if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path))
+				{
+					Mesh->AddToRoot(); // keep the cached variants alive for the whole session
+					Loaded.Add(Mesh);
+				}
+			}
+			return Loaded;
+		}();
+		// The variant comes from its own stream, so the scale/rotation rolls below stay as they were per seed.
+		UStaticMesh* Pine = Pines.Num() > 0 ? Pines[FRandomStream(Seed * 31 + 7).RandRange(0, Pines.Num() - 1)] : nullptr;
+		if (Pine)
+		{
+			const int32 PinePart = A->AddMeshPart(Pine, FVector::ZeroVector, FRotator::ZeroRotator, FVector(0.4f));
+			A->SetVis(PinePart, ETSCVis::LivingOnly); // the Ashen Saga shows only the burnt stump
+		}
+		else
+		{
+			const int32 Trunk = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 70.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 1.4f), Pal::TimberDark * 1.2f);
+			A->SetVis(Trunk, ETSCVis::LivingOnly);
+			const float Z[3] = { 170.f, 262.f, 340.f };
+			const float S[3] = { 1.55f, 1.2f, 0.82f };
+			for (int32 I = 0; I < 3; ++I)
+			{
+				const int32 C = A->AddPart(ETSCShape::Cone, FVector(0.f, 0.f, Z[I]), FRotator::ZeroRotator, FVector(S[I], S[I], 1.5f - I * 0.15f), Green * (1.f + I * 0.18f));
+				A->SetAshen(C, Pal::Char);
+				A->SetVis(C, ETSCVis::LivingOnly);
+			}
 		}
 		if (bWithStump)
 		{

@@ -11,6 +11,7 @@
 #include "Rendering/SlateRenderer.h"
 #include "Styling/CoreStyle.h"
 #include "TSCGameMode.h"
+#include "TSCPrimActor.h"
 #include "TSCUnit.h"
 
 namespace
@@ -258,6 +259,7 @@ void ATSCHUD::DrawHUD()
 	{
 		DrawJobs(GM);
 		DrawBuildBar(GM);
+		DrawDayOnePrompt(GM);
 	}
 	DrawToasts(GM);
 	DrawBanner(GM);
@@ -277,6 +279,7 @@ void ATSCHUD::DrawHUD()
 	}
 	if (GM->bCutOpen)
 	{
+		Hits.Reset();
 		DrawCut(GM);
 	}
 }
@@ -418,7 +421,7 @@ void ATSCHUD::DrawTop(ATSCGameMode* GM)
 	// edits + CUT!, top-right
 	const float Rx = SW - 18.f - 430.f;
 	WoodPanel(Rx, 14.f, 430.f, 96.f);
-	Txt(TEXT("EDITS LEFT"), Rx + 22.f, 24.f, 15.f, Dim);
+	Txt(FString::Printf(TEXT("%d CUTS LEFT"), GM->EditsLeft), Rx + 22.f, 24.f, 15.f, Dim);
 	for (int32 I = 0; I < GM->MaxEdits; ++I)
 	{
 		// film-frame pips
@@ -444,19 +447,22 @@ void ATSCHUD::DrawJobs(ATSCGameMode* GM)
 	WoodPanel(X, Y, W, 196.f);
 	Txt(TEXT("YOUR PEOPLE"), X + 20.f, Y + 12.f, 17.f, Gold);
 	Knot(X + W - 40.f, Y + 24.f, 7.f, FLinearColor(Gold.R, Gold.G, Gold.B, 0.5f));
-	const bool bIdle = GM->NumIdle > 0;
+	const bool bIdle = GM->NumIdle > 0 && !GM->IsFrozen();
+	const ETSCDayOnePrompt Prompt = GM->GetDayOnePrompt();
 
 	float Ry = Y + 46.f;
 	Txt(TEXT("Woodcutters"), X + 20.f, Ry + 6.f, 19.f, Parchment, 0, false);
-	Button(IdWoodMinus, X + 176.f, Ry, 38.f, 38.f, TEXT("-"), GM->NumWood > 0, 24.f);
+	Button(IdWoodMinus, X + 176.f, Ry, 38.f, 38.f, TEXT("-"), GM->NumWood > 0 && !GM->IsFrozen(), 24.f);
 	Txt(FString::FromInt(GM->NumWood), X + 238.f, Ry + 2.f, 26.f, Parchment, 1);
 	Button(IdWoodPlus, X + 262.f, Ry, 38.f, 38.f, TEXT("+"), bIdle, 24.f);
+	if (bIdle && Prompt == ETSCDayOnePrompt::Wood) { Frame(X + 259.f, Ry - 3.f, 44.f, 44.f, Gold, 3.f); }
 
 	Ry += 48.f;
 	Txt(TEXT("Gatherers"), X + 20.f, Ry + 6.f, 19.f, Parchment, 0, false);
-	Button(IdFoodMinus, X + 176.f, Ry, 38.f, 38.f, TEXT("-"), GM->NumFood > 0, 24.f);
+	Button(IdFoodMinus, X + 176.f, Ry, 38.f, 38.f, TEXT("-"), GM->NumFood > 0 && !GM->IsFrozen(), 24.f);
 	Txt(FString::FromInt(GM->NumFood), X + 238.f, Ry + 2.f, 26.f, Parchment, 1);
 	Button(IdFoodPlus, X + 262.f, Ry, 38.f, 38.f, TEXT("+"), bIdle, 24.f);
+	if (bIdle && Prompt == ETSCDayOnePrompt::Food) { Frame(X + 259.f, Ry - 3.f, 44.f, 44.f, Gold, 3.f); }
 
 	Ry += 50.f;
 	Txt(TEXT("Builders / at prayer"), X + 20.f, Ry + 4.f, 19.f, Dim, 0, false);
@@ -519,6 +525,7 @@ void ATSCHUD::DrawBuildBar(ATSCGameMode* GM)
 	Knot(X + 14.f, Y + 68.f, 6.f, FLinearColor(Gold.R, Gold.G, Gold.B, 0.4f));
 	Knot(X + W - 14.f, Y + 68.f, 6.f, FLinearColor(Gold.R, Gold.G, Gold.B, 0.4f));
 	const bool bPlot = GM->FreePlot() >= 0;
+	const ETSCDayOnePrompt Prompt = GM->GetDayOnePrompt();
 	int32 HoverIdx = -1;
 	for (int32 I = 0; I < 5; ++I)
 	{
@@ -526,6 +533,10 @@ void ATSCHUD::DrawBuildBar(ATSCGameMode* GM)
 		const bool bCan = GM->CanBuild(Type);
 		const float Bx = X + 24.f + I * (Bs + Gap), By = Y + 12.f;
 		Button(IdBuild + I, Bx, By, Bs, Bs, FString(), bCan);
+		if (bCan && Prompt == ETSCDayOnePrompt::Build)
+		{
+			Frame(Bx - 3.f, By - 3.f, Bs + 6.f, Bs + 6.f, Gold, 3.f);
+		}
 		if (Hover(Bx, By, Bs, Bs)) { HoverIdx = I; }
 		BuildIcon(I, Bx + Bs * 0.5f, By + Bs * 0.5f - 4.f, 1.f, bCan ? 1.f : 0.35f);
 		Txt(FString::FromInt(I + 1), Bx + 9.f, By + 6.f, 14.f, Dim);
@@ -544,9 +555,69 @@ void ATSCHUD::DrawBuildBar(ATSCGameMode* GM)
 	{
 		Txt(GM->Day < 3 ? TEXT("No free plot. Another is cleared on Day 3.") : TEXT("No free plot."), SW * 0.5f, Y - 30.f, 16.f, Dim, 1, false);
 	}
-	else
+	else if (Prompt == ETSCDayOnePrompt::None)
 	{
 		Txt(TEXT("A plot is marked and waiting: choose what to raise on it."), SW * 0.5f, Y - 30.f, 16.f, Parchment, 1, false);
+	}
+}
+
+void ATSCHUD::DrawDayOnePrompt(ATSCGameMode* GM)
+{
+	const ETSCDayOnePrompt Prompt = GM->GetDayOnePrompt();
+	switch (Prompt)
+	{
+	case ETSCDayOnePrompt::Wood:
+	case ETSCDayOnePrompt::Food:
+	{
+		const bool bWood = Prompt == ETSCDayOnePrompt::Wood;
+		WoodPanel(18.f, 302.f, 330.f, 54.f);
+		Txt(GM->NumIdle == 0 ? TEXT("Free a worker with - first.") :
+			bWood ? TEXT("Send a settler to gather wood.") : TEXT("Send a settler to gather food."),
+			34.f, 317.f, 19.f, Gold);
+		break;
+	}
+	case ETSCDayOnePrompt::Build:
+	{
+		const FTSCPlot& Plot = GM->Plots[GM->FreePlot()];
+		if (Plot.Marker)
+		{
+			const FVector P = Canvas->Project(Plot.Marker->GetActorLocation() + FVector(180.f, 180.f, 120.f));
+			if (P.Z > 0.f)
+			{
+				const float X = P.X / U, Y = P.Y / U;
+				WoodPanel(X - 52.f, Y - 34.f, 104.f, 26.f);
+				Txt(TEXT("BUILD PLOT"), X, Y - 30.f, 13.f, Gold, 1);
+			}
+		}
+		const int32 HouseCost = GM->BuildCost(TSC::EBuilding::House);
+		const bool bCanBuild = GM->CanBuild(TSC::EBuilding::House);
+		const bool bOverBuildBar = Hover(SW * 0.5f - 258.f, SH - 138.f, 516.f, 92.f);
+		if (!bOverBuildBar)
+		{
+			WoodPanel(SW * 0.5f - 250.f, SH - 207.f, 500.f, 46.f);
+			Txt(bCanBuild ? TEXT("Choose a building for the marked plot.") :
+				FString::Printf(TEXT("Gather %d wood to raise your first building."), HouseCost), SW * 0.5f, SH - 196.f, 19.f, Gold, 1);
+		}
+		break;
+	}
+	case ETSCDayOnePrompt::Cut:
+		for (const ATSCUnit* Unit : GM->Units)
+		{
+			if (!Unit || Unit->Role != ETSCRole::Boar || Unit->IsHidden()) { continue; }
+			const FVector P = Canvas->Project(Unit->GetActorLocation() + FVector(0.f, 0.f, Unit->Height + 45.f));
+			if (P.Z > 0.f)
+			{
+				const float X = P.X / U, Y = P.Y / U;
+				WoodPanel(X - 34.f, Y - 37.f, 68.f, 26.f);
+				Txt(TEXT("BOAR"), X, Y - 33.f, 13.f, Gold, 1);
+				Seg(X - 6.f, Y - 10.f, X, Y - 3.f, Gold);
+				Seg(X, Y - 3.f, X + 6.f, Y - 10.f, Gold);
+			}
+			break;
+		}
+		break;
+	default:
+		break;
 	}
 }
 
@@ -560,6 +631,14 @@ void ATSCHUD::DrawBanner(ATSCGameMode* GM)
 	const float Y = GM->Phase == ETSCPhase::Night ? 150.f : 96.f;
 	const float A = FMath::Clamp(GM->BannerTimer, 0.f, 1.f);
 	const bool bCan = GM->CanCut();
+	if (GM->GetDayOnePrompt() == ETSCDayOnePrompt::Cut)
+	{
+		const float PromptW = 410.f;
+		WoodPanel(SW * 0.5f - PromptW * 0.5f, Y + 18.f, PromptW, 76.f);
+		Txt(TEXT("A boar is charging the garden!"), SW * 0.5f, Y + 27.f, 21.f, Parchment, 1);
+		Txt(TEXT("Press Space to CUT!"), SW * 0.5f, Y + 57.f, 19.f, Gold, 1);
+		return;
+	}
 	const float H = bCan ? 118.f : 84.f;
 	Box(X, Y, W, H, FLinearColor(0.02f, 0.015f, 0.01f, 0.88f * A));
 	Frame(X, Y, W, H, bScene ? FLinearColor(CutRed.R, CutRed.G, CutRed.B, A) : FLinearColor(WoodLight.R, WoodLight.G, WoodLight.B, A), 3.f);
@@ -600,19 +679,20 @@ void ATSCHUD::DrawCut(ATSCGameMode* GM)
 {
 	if (GM->ActiveScene < 0) { return; }
 	const FTSCScene& S = GM->Scenes[GM->ActiveScene];
-	Box(0.f, 0.f, SW, SH, FLinearColor(0.f, 0.f, 0.f, 0.62f));
-	Txt(TEXT("CUT!"), SW * 0.5f, 70.f, 68.f, CutRed, 1);
-	Txt(TEXT("The world is frozen.  ") + S.Title, SW * 0.5f, 164.f, 26.f, Parchment, 1);
+	const bool bFirstCut = GM->IsFirstCutFramed();
+	Box(0.f, 0.f, SW, SH, FLinearColor(0.f, 0.f, 0.f, bFirstCut ? 0.28f : 0.62f));
+	Txt(TEXT("CUT!"), SW * 0.5f, bFirstCut ? 87.f : 70.f, bFirstCut ? 42.f : 68.f, CutRed, 1);
+	Txt(TEXT("The world is frozen.  ") + S.Title, SW * 0.5f, bFirstCut ? 140.f : 164.f, 26.f, Parchment, 1);
 
 	// film strip
-	const float StripY = 230.f, StripH = 560.f;
+	const float StripY = bFirstCut ? SH - 352.f : 230.f, StripH = bFirstCut ? 248.f : 560.f;
 	Box(0.f, StripY, SW, StripH, FLinearColor(0.015f, 0.012f, 0.01f, 0.97f));
 	for (float X = 14.f; X < SW; X += 46.f)
 	{
 		Box(X, StripY + 12.f, 24.f, 18.f, FLinearColor(0.3f, 0.28f, 0.24f, 1.f));
 		Box(X, StripY + StripH - 30.f, 24.f, 18.f, FLinearColor(0.3f, 0.28f, 0.24f, 1.f));
 	}
-	const float Fw = FMath::Min(760.f, SW * 0.5f - 60.f), Fh = StripH - 96.f, Fy = StripY + 48.f;
+	const float Fw = FMath::Min(bFirstCut ? 500.f : 760.f, SW * 0.5f - 60.f), Fh = StripH - (bFirstCut ? 72.f : 96.f), Fy = StripY + (bFirstCut ? 36.f : 48.f);
 	for (int32 Take = 0; Take < 2; ++Take)
 	{
 		const float Fx = Take == 0 ? SW * 0.5f - Fw - 20.f : SW * 0.5f + 20.f;
@@ -623,43 +703,46 @@ void ATSCHUD::DrawCut(ATSCGameMode* GM)
 		// a strip of sky and ground: the mood of each saga
 		Box(Fx, Fy, Fw, 8.f, Take == 0 ? LivingGreen : FLinearColor(0.9f, 0.4f, 0.12f, 1.f));
 		Frame(Fx, Fy, Fw, Fh, bSel ? Gold : FLinearColor(0.3f, 0.28f, 0.24f, 1.f), bSel ? 5.f : 2.f);
-		Txt(Take == 0 ? TEXT("TAKE A  -  THE SCENE AS IT STANDS") : TEXT("TAKE B  -  THE ALTERNATE TAKE"), Fx + 28.f, Fy + 26.f, 16.f, Dim);
-		Wrapped(Take == 0 ? S.LivingName : S.AshenName, Fx + 28.f, Fy + 56.f, Fw - 56.f, 27.f, Take == 0 ? LivingGreen : FLinearColor(1.f, 0.62f, 0.3f, 1.f), true);
-		Wrapped(Take == 0 ? S.LivingText : S.AshenText, Fx + 28.f, Fy + 150.f, Fw - 56.f, 21.f, Parchment);
-		Txt(Take == 0 ? TEXT("Costs no edit.") : TEXT("Costs 1 edit. Permanent."), Fx + 28.f, Fy + Fh - 48.f, 18.f, Take == 0 ? Dim : FLinearColor(1.f, 0.75f, 0.35f, 1.f));
-		if (bSel) { Txt(TEXT("SELECTED"), Fx + Fw - 28.f, Fy + 26.f, 16.f, Gold, 2); }
+		const float LabelY = Fy + (bFirstCut ? 16.f : 26.f);
+		Txt(Take == 0 ? (bFirstCut ? TEXT("CURRENT TAKE") : TEXT("TAKE A  -  THE SCENE AS IT STANDS")) :
+			(bFirstCut ? TEXT("ALTERNATE TAKE") : TEXT("TAKE B  -  THE ALTERNATE TAKE")), Fx + 28.f, LabelY, 16.f, Dim);
+		const float TextY = Wrapped(Take == 0 ? S.LivingName : S.AshenName, Fx + 28.f, Fy + (bFirstCut ? 40.f : 56.f),
+			Fw - 56.f, bFirstCut ? 22.f : 27.f, Take == 0 ? LivingGreen : FLinearColor(1.f, 0.62f, 0.3f, 1.f), true);
+		Wrapped(Take == 0 ? S.LivingText : S.AshenText, Fx + 28.f, bFirstCut ? TextY + 6.f : Fy + 150.f, Fw - 56.f, bFirstCut ? 18.f : 21.f, Parchment);
+		Txt(Take == 0 ? TEXT("No cut spent") : TEXT("Spends 1 cut. Permanent."), Fx + 28.f, Fy + Fh - (bFirstCut ? 33.f : 48.f), 18.f, Take == 0 ? Dim : FLinearColor(1.f, 0.75f, 0.35f, 1.f));
+		if (bSel) { Txt(TEXT("SELECTED"), Fx + Fw - 28.f, LabelY, 16.f, Gold, 2); }
 		FHit Hit;
 		Hit.Box = FBox2D(FVector2D(Fx * U, Fy * U), FVector2D((Fx + Fw) * U, (Fy + Fh) * U));
 		Hit.Id = Take == 0 ? IdTakeLiving : IdTakeAshen;
 		Hits.Add(Hit);
 	}
-	Txt(TEXT("Every edit solves one problem and creates or keeps another."), SW * 0.5f, StripY + StripH + 22.f, 20.f, Dim, 1, false);
-	const FString Label = GM->SelectedTake == 1 ? FString::Printf(TEXT("CONFIRM THE EDIT  (%d left)"), GM->EditsLeft) : FString(TEXT("KEEP THIS TAKE - RESUME"));
+	if (!bFirstCut) { Txt(TEXT("Every edit solves one problem and creates or keeps another."), SW * 0.5f, StripY + StripH + 22.f, 20.f, Dim, 1, false); }
+	const FString Label = GM->SelectedTake == 1 ? FString::Printf(TEXT("CONFIRM CUT  (%d left after)"), GM->EditsLeft - 1) : FString(TEXT("KEEP THIS TAKE - RESUME"));
 	const FLinearColor Col = GM->SelectedTake == 1 ? CutRed : WoodMid;
-	Button(IdConfirm, SW * 0.5f - 260.f, StripY + StripH + 66.f, 520.f, 74.f, Label, true, 26.f, &Col);
+	Button(IdConfirm, SW * 0.5f - 260.f, StripY + StripH + (bFirstCut ? 12.f : 66.f), 520.f, 74.f, Label, true, 26.f, &Col);
 }
 
 // ----- title and epilogue -------------------------------------------------------------------------------------------
 
 void ATSCHUD::DrawTitle(ATSCGameMode* GM)
 {
-	Box(0.f, 0.f, SW, SH, FLinearColor(0.f, 0.f, 0.f, 0.55f));
-	const float W = 980.f, X = SW * 0.5f - W * 0.5f, Y = 130.f;
-	WoodPanel(X, Y, W, 760.f);
-	Knot(X + 70.f, Y + 78.f, 14.f, Gold);
-	Knot(X + W - 70.f, Y + 78.f, 14.f, Gold);
-	Txt(TEXT("THE SAGA CUTTER"), SW * 0.5f, Y + 36.f, 66.f, Gold, 1);
-	Txt(TEXT("three days, one night, two sagas"), SW * 0.5f, Y + 128.f, 22.f, Dim, 1, false);
-	float Ty = Y + 196.f;
-	Ty = Wrapped(TEXT("Your settlement exists in two tellings. The Living Saga is a misty forest, rich in timber, food and glowing mushrooms, and crawling with the things that grow in the fog. The Ashen Saga is the same land after fire and war: open paths, stone walls, and little left to harvest."),
-		X + 70.f, Ty, W - 140.f, 21.f, Parchment);
-	Ty = Wrapped(TEXT("When a scene goes wrong, press CUT! The world freezes and you may swap that scene for its other take. Every edit solves one problem and creates or keeps another, and you have only three."),
-		X + 70.f, Ty + 16.f, W - 140.f, 21.f, Parchment);
-	Ty = Wrapped(TEXT("By day: assign your people to wood and food, and raise a building on the marked plot. On the final night, creatures come from the forest and raiders from the sea. Then the skald will sing your cut of the saga."),
-		X + 70.f, Ty + 16.f, W - 140.f, 21.f, Parchment);
+	// The title stays out of the picture: the landfall story plays behind it. Two bars, nothing in the middle.
+	const float Bar = 96.f;
+	if (GM->ProFade > 0.f)
+	{
+		Box(0.f, Bar, SW, SH - Bar * 2.f, FLinearColor(0.f, 0.f, 0.f, GM->ProFade));
+	}
+	Box(0.f, 0.f, SW, Bar, FLinearColor(0.f, 0.f, 0.f, 0.94f));
+	Box(0.f, SH - Bar, SW, Bar, FLinearColor(0.f, 0.f, 0.f, 0.94f));
+	Txt(TEXT("THE SAGA CUTTER"), 48.f, 12.f, 44.f, Gold, 0);
+	Txt(TEXT("three days, one night, two sagas"), 50.f, 64.f, 17.f, Dim, 0, false);
+	Txt(TEXT("Space to start Day 1"), SW - 48.f, 38.f, 16.f, Dim, 2, false);
+	if (GM->bPrologue && GM->ProCaptionAlpha > 0.f)
+	{
+		Txt(GM->ProCaption, SW * 0.5f, SH - Bar + 28.f, 28.f, FLinearColor(Parchment.R, Parchment.G, Parchment.B, GM->ProCaptionAlpha), 1, false);
+	}
 	const FLinearColor Col = CutRed;
-	Button(IdStart, SW * 0.5f - 220.f, Y + 610.f, 440.f, 84.f, TEXT("BEGIN THE SAGA"), true, 30.f, &Col);
-	Txt(TEXT("Mouse: buttons   |   Space: CUT!   |   WASD / wheel: move and zoom the camera"), SW * 0.5f, Y + 712.f, 16.f, Dim, 1, false);
+	Button(IdStart, SW - 48.f - 290.f, SH - Bar + 20.f, 290.f, 56.f, TEXT("START DAY 1"), true, 22.f, &Col);
 }
 
 void ATSCHUD::DrawEpilogue(ATSCGameMode* GM)

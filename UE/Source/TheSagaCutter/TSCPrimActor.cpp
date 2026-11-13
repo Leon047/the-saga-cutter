@@ -90,6 +90,30 @@ int32 ATSCPrimActor::AddPartQ(ETSCShape Shape, const FVector& Loc, const FQuat& 
 	return Parts.Add(Part);
 }
 
+int32 ATSCPrimActor::AddMeshPart(UStaticMesh* Mesh, const FVector& Loc, const FRotator& Rot, const FVector& Scale, USceneComponent* Parent)
+{
+	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this);
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetStaticMesh(Mesh);
+	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Comp->SetGenerateOverlapEvents(false);
+	Comp->SetCanEverAffectNavigation(false);
+	Comp->SetupAttachment(Parent ? Parent : Root.Get());
+	Comp->SetRelativeLocationAndRotation(Loc, Rot);
+	Comp->SetRelativeScale3D(Scale);
+	Comp->RegisterComponent();
+	AddInstanceComponent(Comp);
+
+	FTSCPart Part;
+	Part.Comp = Comp;
+	Part.Scale = Scale;
+	if (bStepParts)
+	{
+		Part.BuildStep = NumBuildSteps++;
+	}
+	return Parts.Add(Part);
+}
+
 USceneComponent* ATSCPrimActor::AddPivot(const FVector& Loc, USceneComponent* Parent)
 {
 	USceneComponent* Pivot = NewObject<USceneComponent>(this);

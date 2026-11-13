@@ -1,0 +1,3 @@
+[mcp_servers.unreal-mcp]
+command = "python"
+args = ["Scripts/mcp/ue_mcp_proxy.py"]

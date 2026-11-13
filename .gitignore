@@ -44,3 +44,15 @@ __pycache__/
 # Local Claude settings and secrets
 .claude/settings.local.json
 .env.local
+
+# Video files (demo renders, gameplay captures)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.wmv
+*.m4v
+*.flv
+*.mpg
+*.mpeg
