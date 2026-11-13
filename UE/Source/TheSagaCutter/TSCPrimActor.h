@@ -72,7 +72,7 @@ public:
 	/** Advances saga blending and light flicker. Called by the game mode, also while the simulation is frozen. */
 	void SimVisual(float Dt, float Time);
 	/** Push colours, emissive, scale and visibility of every part to the components. */
-	void Refresh();
+	virtual void Refresh();
 
 	static FLinearColor Ashify(const FLinearColor& C);
 

@@ -318,6 +318,7 @@ void ATSCGameMode::BuildWorld()
 			if (!bForest && !bFrame && !bGroveTree) { continue; }
 			if (X > 27) { UE_LOG(LogSaga, Warning, TEXT("[Saga] tree loop: X=%d Y=%d forest=%d frame=%d grove=%d"), X, Y, bForest, bFrame, bGroveTree); continue; }
 			if (bForest && (Y == 11 || Y == 12)) { continue; } // forest road
+			if (!bForest && (Y == -1 || Y == GH)) { continue; } // north/south log walls (placed in Map_Saga)
 			const float Density = bForest ? (X >= 5 ? 0.42f : 0.62f) : bGroveTree ? 0.4f : 0.5f;
 			if (Rand01(X, Y, 7) > Density)
 			{
@@ -346,7 +347,8 @@ void ATSCGameMode::BuildWorld()
 	}
 
 	// ----- palisade and gate (west) -----
-	for (int32 Y = -4; Y < GH + 4; ++Y)
+	// It ends where the north/south log walls placed in Map_Saga (y = -2500 / +2500) meet it.
+	for (int32 Y = -1; Y <= GH; ++Y)
 	{
 		if (Y == GateY || Y == GateY + 1) { continue; }
 		ATSCPrimActor* P = SpawnPrim(CellCorner(GateX, Y));
