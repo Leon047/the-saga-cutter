@@ -48,6 +48,7 @@ private:
 	void DrawTop(ATSCGameMode* GM);
 	void DrawJobs(ATSCGameMode* GM);
 	void DrawBuildBar(ATSCGameMode* GM);
+	void DrawDayOnePrompt(ATSCGameMode* GM);
 	void DrawBanner(ATSCGameMode* GM);
 	void DrawToasts(ATSCGameMode* GM);
 	void DrawCut(ATSCGameMode* GM);

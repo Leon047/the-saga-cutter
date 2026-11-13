@@ -6,7 +6,14 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/PostProcessComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -77,6 +84,13 @@ namespace
 		UKismetMaterialLibrary::SetScalarParameterValue(World, Wind, TEXT("WindAmp"), FMath::Clamp(0.45f + 0.3f * SmoothSpeed, 0.3f, 2.f));
 		UKismetMaterialLibrary::SetVectorParameterValue(World, Wind, TEXT("WindDir"), FLinearColor(SmoothDir.X, SmoothDir.Y, 0.f, 0.f));
 	}
+
+	// Prologue beats (seconds): landfall, clearing, raising, the forest wakes, hold and fade.
+	const float ProTLand = 8.f, ProTClear = 20.f, ProTRaise = 34.f, ProTWake = 45.f, ProTEnd = 51.f;
+	const float ProShipRun = 2400.f;
+	const float DefaultCamArm = 16500.f;
+	TAutoConsoleVariable<int32> CVarPrologue(TEXT("tsc.Prologue"), 1,
+		TEXT("0: the title screen shows the finished village instead of the landfall prologue (also -NoPrologue)."));
 }
 
 ATSCGameMode::ATSCGameMode()
@@ -349,7 +363,8 @@ void ATSCGameMode::BuildWorld()
 		ATSCPrimActor* Base = SpawnPrim(FVector(0.f, 0.f, -8.f));
 		Base->AddPart(ETSCShape::Cube, FVector::ZeroVector, FRotator::ZeroRotator, FVector(900.f, 900.f, 0.02f), Pal::ForestFloor * 0.8f);
 		// settlement green
-		Base->AddPart(ETSCShape::Cube, FVector(CellF(17.f, 12.f).X, 0.f, 3.f), FRotator::ZeroRotator, FVector(18.f * 2.f, 34.f * 2.f, 0.02f), Pal::Grass);
+		MeadowPart = Base->AddPart(ETSCShape::Cube, FVector(CellF(17.f, 12.f).X, 0.f, 3.f), FRotator::ZeroRotator, FVector(18.f * 2.f, 34.f * 2.f, 0.02f), Pal::Grass);
+		GroundBase = Base;
 		// rocky shore
 		Base->AddPart(ETSCShape::Cube, FVector(CellF(27.f, 12.f).X, 0.f, 4.f), FRotator::ZeroRotator, FVector(4.f, 34.f * 2.f, 0.03f), Pal::Shore);
 		WaterActor = SpawnPrim(FVector(CellF(28.f, 12.f).X + 20000.f, 0.f, -2.f));
@@ -368,6 +383,7 @@ void ATSCGameMode::BuildWorld()
 		PathCell(14, 3); PathCell(15, 3); PathCell(16, 3);
 		for (int32 Y = 14; Y <= 19; ++Y) { PathCell(14, Y); }
 		PathCell(20, 9); PathCell(20, 10); PathCell(21, 13); PathCell(21, 14);
+		ProDressing.Add(Paths);
 	}
 	for (int32 X = -6; X < GW + 2; ++X)
 	{
@@ -383,6 +399,7 @@ void ATSCGameMode::BuildWorld()
 				: Region == TSCRegion::Grove ? FLinearColor(0.04f, 0.085f, 0.055f) : Pal::Grass;
 			BuildGroundTile(G, Living * V, (Rand01(X, Y, 2) > 0.5f ? Pal::Ash : Pal::Char * 1.6f) * V);
 			G->Refresh();
+			if (Region == TSCRegion::Garden) { ProDressing.Add(G); }
 		}
 	}
 
@@ -491,6 +508,7 @@ void ATSCGameMode::BuildWorld()
 				P->SetActorRotation(FRotator(0.f, FMath::RadiansToDegrees(FMath::Atan2(Dir.Y, Dir.X)) - 90.f, 0.f));
 				BuildPalisadeSegment(P, Dir.Size2D(), Seg++);
 				P->Refresh();
+				WallSegs.Add(P);
 			}
 		}
 		// the gate and the road in front of it stay open
@@ -502,6 +520,7 @@ void ATSCGameMode::BuildWorld()
 	Gate = SpawnPrim(CellCorner(GateX, GateY));
 	BuildGate(Gate, GateLeaves);
 	Gate->Refresh();
+	ProDressing.Add(Gate);
 
 	// the spruce by the gate: a separate stump stands in for its Ashen version
 	EventTree = SpawnPrim(CellCenter(TreeX, TreeY), TSCRegion::Forest);
@@ -521,6 +540,8 @@ void ATSCGameMode::BuildWorld()
 	{
 		ATSCPrimActor* A = SpawnPrim(CellCorner(X, Y), Region);
 		BlockRect(X, Y, W, H);
+		A->bStepParts = true;  // lets the prologue raise it tile by tile; at full progress nothing changes
+		ProBuildings.Add(A);
 		return A;
 	};
 	{
@@ -539,6 +560,7 @@ void ATSCGameMode::BuildWorld()
 			A = SpawnPrim(CellF(L.X, L.Y));
 			BuildLogPile(A);
 			A->Refresh();
+			ProDressing.Add(A);
 			const FIntPoint C = WorldToCell(CellF(L.X, L.Y));
 			SetBlocked(C.X, C.Y, true);
 		}
@@ -546,14 +568,17 @@ void ATSCGameMode::BuildWorld()
 	Garden = SpawnPrim(CellCorner(16, 15), TSCRegion::Garden);
 	BuildGarden(Garden, 4, 3, CropParts);
 	Garden->Refresh();
+	ProDressing.Add(Garden);
 
 	DockActor = SpawnPrim(CellCorner(26, 11), TSCRegion::Dock);
 	BuildDock(DockActor, 6, 2, CrateParts);
 	DockActor->Refresh();
+	ProDressing.Add(DockActor);
 	{
-		ATSCPrimActor* Ship = SpawnPrim(CellF(30.6f, 14.4f) + FVector(0.f, 0.f, -6.f), TSCRegion::Dock);
-		BuildLongship(Ship);
-		Ship->Refresh();
+		ShipMooring = CellF(30.6f, 14.4f) + FVector(0.f, 0.f, -6.f);
+		Longship = SpawnPrim(ShipMooring, TSCRegion::Dock);
+		BuildLongship(Longship);
+		Longship->Refresh();
 	}
 	// water is blocked except the dock and the shallows
 	for (int32 X = 30; X < GW; ++X)
@@ -588,6 +613,7 @@ void ATSCGameMode::BuildWorld()
 		ATSCPrimActor* A = SpawnPrim(CellF(T.X, T.Y));
 		BuildTorch(A);
 		A->Refresh();
+		ProDressing.Add(A);
 	}
 
 	// ----- construction plots -----
@@ -603,6 +629,7 @@ void ATSCGameMode::BuildWorld()
 	}
 	Plots[0].bAvailable = true;
 	Plots[0].Marker->SetActorHiddenInGame(false);
+	ProDressing.Add(Plots[0].Marker);
 
 	// ----- people -----
 	Hunter = SpawnUnit(ETSCRole::Hunter, TEXT("Hakon the Hunter"), CellF(9.6f, 12.f));
@@ -616,6 +643,22 @@ void ATSCGameMode::BuildWorld()
 	}
 	NumWood = 4;
 	NumFood = 4;
+	NumHomeUnits = Units.Num();
+	for (ATSCUnit* U : Units) { UnitHome.Add(U->GetActorLocation()); }
+	ResetVillagers();
+}
+
+void ATSCGameMode::ResetVillagers()
+{
+	for (int32 I = 0; I < NumHomeUnits && I < Units.Num(); ++I)
+	{
+		if (ATSCUnit* U = Units[I])
+		{
+			U->Teleport(UnitHome[I]);
+			U->SetActorRotation(FRotator::ZeroRotator);
+			U->SetActorHiddenInGame(false);
+		}
+	}
 	Hunter->OrderWork(CellF(3.5f, 12.f), CellF(5.6f, 11.4f));
 	Woodcutter->OrderWork(CellF(7.5f, 9.5f), CellF(11.5f, 6.5f));
 	Healer->OrderWork(CellF(22.6f, 11.5f), CellF(21.4f, 12.3f));
@@ -628,13 +671,294 @@ void ATSCGameMode::BeginPlay()
 	Super::BeginPlay();
 	EditsLeft = MaxEdits;
 	DefineScenes();
+	CollectLevelProps();  // before anything is spawned at runtime
 	BuildAtmosphere();
 	BuildWorld();
+	BuildPrologueExtras();
 	float W, F;
 	ComputeRates(W, F);
 	WoodRate = FMath::RoundToInt(W);
 	FoodRate = FMath::RoundToInt(F);
 	PlayMusic(MenuMusic);
+	if (CVarPrologue.GetValueOnGameThread() != 0 && !FParse::Param(FCommandLine::Get(), TEXT("NoPrologue")))
+	{
+		StartPrologue();
+	}
+}
+
+// =====================================================================================================================
+// Prologue: the settlers land, clear the forest and build; the forest notices. Plays in a loop behind the title.
+// =====================================================================================================================
+
+void ATSCGameMode::CollectLevelProps()
+{
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* A = *It;
+		if (!A || A->IsHidden()) { continue; }
+		const AStaticMeshActor* SM = Cast<AStaticMeshActor>(A);
+		const bool bPropBlueprint = A->GetClass()->GetPathName().StartsWith(TEXT("/Game/Props/"));
+		if (!SM && !bPropBlueprint) { continue; }
+		if (SM)
+		{
+			const UStaticMesh* Mesh = SM->GetStaticMeshComponent() ? SM->GetStaticMeshComponent()->GetStaticMesh() : nullptr;
+			if (!Mesh || Mesh->GetPathName().Contains(TEXT("Mushroom"))) { continue; }  // mushrooms belong to the forest
+		}
+		const FVector P = A->GetActorLocation();
+		const float Cx = P.X / CELL + GW / 2, Cy = P.Y / CELL + GH / 2;
+		if (Cx < 27.5f && WallShape(Cx, Cy) < 1.08f) { ProLevelProps.Add(A); }
+	}
+	ProLevelProps.Sort([](const AActor& A, const AActor& B) { return A.GetActorLocation().X > B.GetActorLocation().X; });
+	UE_LOG(LogSaga, Display, TEXT("[Saga] Prologue: %d level props inside the wall"), ProLevelProps.Num());
+}
+
+void ATSCGameMode::BuildPrologueExtras()
+{
+	// the forest that stood where the village is: never blocks a cell, only shown during the prologue
+	for (int32 X = 9; X <= 26; ++X)
+	{
+		for (int32 Y = 0; Y < 20; ++Y)
+		{
+			if (WallShape(X + 0.5f, Y + 0.5f) > 0.9f || Rand01(X, Y, 23) > 0.36f) { continue; }
+			const FVector Jitter((Rand01(X, Y, 24) - 0.5f) * 90.f, (Rand01(X, Y, 25) - 0.5f) * 90.f, 0.f);
+			ATSCPrimActor* T = SpawnPrim(CellCenter(X, Y) + Jitter);
+			BuildTree(T, X * 41 + Y * 7, false);
+			T->Refresh();
+			T->SetActorHiddenInGame(true);
+			ProTrees.Add(T);
+			// felled in a wave from the shore to the west
+			ProTreeFell.Add(ProTLand + 1.2f + (26 - X) / 17.f * 9.f + Rand01(X, Y, 29) * 1.6f);
+			ProTreeYaw.Add(Rand01(X, Y, 30) * 2.f * PI);
+		}
+	}
+	// the watchers at the tree line: not in Units, so nobody targets them and they fight nobody
+	for (int32 I = 0; I < 6; ++I)
+	{
+		ATSCUnit* W = SpawnUnit(ETSCRole::Creature, FString(), CellF(3.f, 10.f + I));
+		Units.Remove(W);
+		W->SetActorHiddenInGame(true);
+		ProWatchers.Add(W);
+	}
+	const FVector GatePos = CellCorner(GateX, GateY + 1);
+	WallSegs.Sort([GatePos](const ATSCPrimActor& A, const ATSCPrimActor& B)
+	{
+		return FVector::DistSquared2D(A.GetActorLocation(), GatePos) < FVector::DistSquared2D(B.GetActorLocation(), GatePos);
+	});
+}
+
+void ATSCGameMode::SetCameraView(const FVector& Loc, float Arm)
+{
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (ATSCColonyCameraPawn* Cam = Cast<ATSCColonyCameraPawn>(PC->GetPawn())) { Cam->SetView(Loc, Arm); }
+	}
+}
+
+void ATSCGameMode::StartPrologue()
+{
+	bPrologue = true;
+	ProTime = 0.f;
+	ProLanded = 0;
+	ProStage = 0;
+	ProDusk = 0.f;
+	ProFade = 1.f;
+	ProCaption.Empty();
+	ProCaptionAlpha = 0.f;
+
+	Longship->SetActorLocation(ShipMooring + FVector(ProShipRun, 0.f, 0.f));
+	for (ATSCPrimActor* S : WallSegs) { S->SetActorHiddenInGame(true); }
+	for (ATSCPrimActor* D : ProDressing) { D->SetActorHiddenInGame(true); }
+	for (AActor* A : ProLevelProps) { if (A) { A->SetActorHiddenInGame(true); } }
+	for (ATSCPrimActor* B : ProBuildings) { B->SetBuildProgress(0.f); }
+	for (ATSCPrimActor* T : ProTrees)
+	{
+		T->SetActorRotation(FRotator::ZeroRotator);
+		T->SetActorScale3D(FVector::OneVector);
+		T->SetActorHiddenInGame(false);
+	}
+	for (ATSCUnit* W : ProWatchers) { W->SetActorHiddenInGame(true); }
+	GroundBase->Parts[MeadowPart].LCol = Pal::ForestFloor * 0.8f;
+	GroundBase->Refresh();
+	for (int32 I = 0; I < NumHomeUnits && I < Units.Num(); ++I)
+	{
+		Units[I]->Teleport(ShipMooring);
+		Units[I]->SetActorHiddenInGame(true);
+	}
+	ProCamLoc = CellF(25.5f, 13.f);
+	ProCamArm = 10500.f;
+	SetCameraView(ProCamLoc, ProCamArm);
+	PlayMusic(MenuMusic);
+}
+
+void ATSCGameMode::EndPrologue()
+{
+	if (!bPrologue) { return; }
+	bPrologue = false;
+	ProFade = 0.f;
+	ProDusk = 0.f;
+	ProCaptionAlpha = 0.f;
+
+	Longship->SetActorLocation(ShipMooring);
+	for (ATSCPrimActor* S : WallSegs)
+	{
+		S->SetActorScale3D(FVector::OneVector);
+		S->SetActorHiddenInGame(false);
+	}
+	for (ATSCPrimActor* D : ProDressing) { D->SetActorHiddenInGame(false); }
+	for (AActor* A : ProLevelProps) { if (A) { A->SetActorHiddenInGame(false); } }
+	for (ATSCPrimActor* B : ProBuildings) { B->SetBuildProgress(1.f); }
+	for (ATSCPrimActor* T : ProTrees) { T->SetActorHiddenInGame(true); }
+	for (ATSCUnit* W : ProWatchers) { W->SetActorHiddenInGame(true); }
+	GroundBase->Parts[MeadowPart].LCol = Pal::Grass;
+	GroundBase->Refresh();
+	ResetVillagers();
+	++GridVersion;  // everyone plans a fresh path from home
+	SetCameraView(CellF(17.f, 12.f), DefaultCamArm);
+	PlayMusic(MenuMusic);
+}
+
+void ATSCGameMode::SimPrologue(float Dt)
+{
+	ProTime += Dt;
+	const float T = ProTime;
+	if (T >= ProTEnd)
+	{
+		StartPrologue();
+		return;
+	}
+	ProFade = FMath::Clamp(FMath::Max(1.f - T / 1.2f, (T - (ProTEnd - 1.4f)) / 1.2f), 0.f, 1.f);
+
+	// ----- captions: one line per beat -----
+	{
+		static const TCHAR* Lines[4] = {
+			TEXT("They came on the grey tide, one ship and forty souls."),
+			TEXT("The forest was old. They did not ask its leave."),
+			TEXT("Timber became wall, and wall became home."),
+			TEXT("But every stump was counted. The forest remembers.") };
+		const float Edges[5] = { 0.f, ProTLand, ProTClear, ProTRaise, ProTWake };
+		ProCaptionAlpha = 0.f;
+		for (int32 I = 0; I < 4; ++I)
+		{
+			if (T >= Edges[I] && T < Edges[I + 1])
+			{
+				ProCaption = Lines[I];
+				ProCaptionAlpha = FMath::Clamp(FMath::Min(T - Edges[I] - 0.7f, Edges[I + 1] - 0.3f - T) / 0.8f, 0.f, 1.f);
+			}
+		}
+	}
+
+	// ----- the ship comes in -----
+	{
+		const float A = FMath::Clamp(T / (ProTLand - 0.5f), 0.f, 1.f);
+		const float Left = FMath::Pow(1.f - A, 3.f);
+		Longship->SetActorLocation(ShipMooring + FVector(ProShipRun * Left, 0.f, 5.f * FMath::Sin(WorldTime * 1.8f) * (0.25f + Left)));
+	}
+
+	// ----- people: ashore one by one, then to the trees, then to the building sites, then home -----
+	while (ProLanded < NumHomeUnits && T > ProTLand - 0.8f + ProLanded * 0.45f)
+	{
+		const int32 I = ProLanded++;
+		ATSCUnit* U = Units[I];
+		U->Teleport(CellF(29.4f, 11.3f + (I % 2) * 0.7f));
+		U->SetActorHiddenInGame(false);
+		U->OrderWork(CellF(23.5f - (I % 7) * 2.f, 4.5f + ((I * 5) % 15)), CellF(25.2f, 9.5f + (I % 5)));
+	}
+	if (ProStage == 0 && T >= ProTClear)
+	{
+		ProStage = 1;
+		static const FVector2D Sites[14] = { {13.5f, 13.4f}, {20.4f, 13.4f}, {11.6f, 6.4f}, {21.5f, 11.3f}, {11.f, 17.3f}, {13.f, 19.3f}, {22.f, 7.3f},
+			{24.f, 17.3f}, {9.6f, 10.4f}, {9.6f, 13.5f}, {12.5f, 8.5f}, {16.5f, 9.5f}, {18.5f, 13.5f}, {10.5f, 13.f} };
+		for (int32 I = 0; I < ProLanded; ++I)
+		{
+			Units[I]->OrderWork(CellF(Sites[I % 14].X, Sites[I % 14].Y), CellF(13.2f + (I % 3) * 0.6f, 5.6f));
+		}
+	}
+	if (ProStage == 1 && T >= ProTRaise)
+	{
+		ProStage = 2;
+		for (int32 I = 0; I < ProLanded; ++I) { Units[I]->OrderHold(UnitHome[I]); }
+		PlayMusic(NightMusic);
+	}
+	for (int32 I = 0; I < ProLanded; ++I) { Units[I]->Sim(Dt); }
+
+	// ----- the trees come down -----
+	for (int32 I = 0; I < ProTrees.Num(); ++I)
+	{
+		ATSCPrimActor* Tree = ProTrees[I];
+		const float D = T - ProTreeFell[I];
+		if (D <= 0.f || Tree->IsHidden()) { continue; }
+		if (D < 1.3f)
+		{
+			const float A = D / 1.3f;
+			const float Ang = A * A * HALF_PI * 0.985f;
+			const float S = FMath::Sin(Ang);
+			Tree->SetActorRotation(FQuat::FindBetweenNormals(FVector::UpVector, FVector(FMath::Cos(ProTreeYaw[I]) * S, FMath::Sin(ProTreeYaw[I]) * S, FMath::Cos(Ang))));
+		}
+		else if (D < 2.5f)
+		{
+			Tree->SetActorScale3D(FVector(FMath::Max(0.02f, 1.f - (D - 1.3f) / 1.2f)));  // limbed and hauled off
+		}
+		else
+		{
+			Tree->SetActorHiddenInGame(true);
+		}
+	}
+	{
+		const float A = FMath::SmoothStep(ProTLand + 3.f, ProTClear + 1.f, T);
+		GroundBase->Parts[MeadowPart].LCol = FMath::Lerp(Pal::ForestFloor * 0.8f, Pal::Grass, A);
+		GroundBase->Refresh();
+	}
+
+	// ----- the wall goes up from the gate outwards, then the houses and everything in them -----
+	for (int32 I = 0; I < WallSegs.Num(); ++I)
+	{
+		const float D = (T - (ProTClear + 0.3f + 9.5f * I / WallSegs.Num())) / 0.3f;
+		if (D <= 0.f) { continue; }
+		WallSegs[I]->SetActorScale3D(FVector(1.f, 1.f, FMath::Clamp(D, 0.05f, 1.f)));
+		if (WallSegs[I]->IsHidden()) { WallSegs[I]->SetActorHiddenInGame(false); }
+	}
+	for (int32 I = 0; I < ProDressing.Num(); ++I)
+	{
+		if (ProDressing[I]->IsHidden() && T > ProTClear + 1.5f + 10.f * I / ProDressing.Num()) { ProDressing[I]->SetActorHiddenInGame(false); }
+	}
+	for (int32 I = 0; I < ProBuildings.Num(); ++I)
+	{
+		const float P = FMath::Clamp((T - (ProTClear + 1.f + I * 1.2f)) / 5.5f, 0.f, 1.f);
+		if (!FMath::IsNearlyEqual(ProBuildings[I]->BuildProgress, P)) { ProBuildings[I]->SetBuildProgress(P); }
+	}
+	for (int32 I = 0; I < ProLevelProps.Num(); ++I)
+	{
+		AActor* A = ProLevelProps[I];
+		if (A && A->IsHidden() && T > ProTClear + 5.f + 8.f * I / ProLevelProps.Num()) { A->SetActorHiddenInGame(false); }
+	}
+
+	// ----- dusk, fog, and the things that grow in it -----
+	ProDusk = FMath::SmoothStep(ProTRaise - 2.5f, ProTRaise + 2.5f, T);
+	for (int32 I = 0; I < ProWatchers.Num(); ++I)
+	{
+		ATSCUnit* W = ProWatchers[I];
+		const float In = FMath::Clamp((T - (ProTRaise + 1.2f + I * 0.35f)) / 1.6f, 0.f, 1.f);
+		const float Out = FMath::Clamp((T - (ProTWake - 3.6f + I * 0.2f)) / 2.2f, 0.f, 1.f);
+		const float A = FMath::SmoothStep(0.f, 1.f, In) * (1.f - FMath::SmoothStep(0.f, 1.f, Out));
+		const bool bShow = A > 0.01f;
+		if (W->IsHidden() == bShow) { W->SetActorHiddenInGame(!bShow); }
+		if (!bShow) { continue; }
+		const FVector Front = CellF(6.7f - (I % 2) * 1.1f, 9.3f + I * 0.95f);
+		W->SetActorLocation(FMath::Lerp(Front + FVector(-700.f, 0.f, 0.f), Front, A));
+		W->SetActorRotation(FRotator::ZeroRotator);  // facing the gate
+		W->SetActorScale3D(FVector(FMath::Max(0.05f, A)));
+		W->Idle(Dt);
+	}
+
+	// ----- camera: one slow move per beat -----
+	{
+		const FVector Target = T < ProTLand ? CellF(25.5f, 13.f) : T < ProTClear ? CellF(20.f, 12.f) : T < ProTRaise ? CellF(17.f, 12.f)
+			: T < ProTWake ? CellF(10.5f, 11.5f) : CellF(17.f, 12.f);
+		const float Arm = T < ProTLand ? 10500.f : T < ProTClear ? 14500.f : T < ProTRaise ? DefaultCamArm : T < ProTWake ? 9500.f : DefaultCamArm;
+		ProCamLoc = FMath::VInterpTo(ProCamLoc, Target, Dt, 0.8f);
+		ProCamArm = FMath::FInterpTo(ProCamArm, Arm, Dt, 0.8f);
+		SetCameraView(ProCamLoc, ProCamArm);
+	}
 }
 
 // =====================================================================================================================
@@ -692,6 +1016,8 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	if (bPrologue && Phase == ETSCPhase::Title) { SimPrologue(RealDt); }
+
 	if (!IsFrozen())
 	{
 		const int32 Steps = FMath::Max(1, FMath::CeilToInt(SpeedMul));
@@ -715,7 +1041,7 @@ void ATSCGameMode::UpdateAtmosphere(float Dt)
 	AshAmount = FMath::FInterpTo(AshAmount, NumAshen / 4.f, Dt, 0.6f);
 
 	const bool bNight = Phase == ETSCPhase::Night || (Phase == ETSCPhase::Epilogue);
-	const float F = Phase == ETSCPhase::Day ? FMath::Clamp(DayTime / DayLength, 0.f, 1.f) : (Phase == ETSCPhase::Title ? 0.55f : 1.f);
+	const float F = Phase == ETSCPhase::Day ? FMath::Clamp(DayTime / DayLength, 0.f, 1.f) : (Phase == ETSCPhase::Title ? (bPrologue ? FMath::Lerp(0.1f, 1.f, ProDusk) : 0.55f) : 1.f);
 	// cold blue-grey day sliding into an orange dusk; the night is a deep blue lit by fires
 	FLinearColor SunCol = FMath::Lerp(FLinearColor(0.62f, 0.74f, 1.f), FLinearColor(1.f, 0.56f, 0.34f), F * F);
 	float SunInt = FMath::Lerp(3.6f, 2.2f, F);
@@ -739,7 +1065,7 @@ void ATSCGameMode::UpdateAtmosphere(float Dt)
 	TopFill->SetIntensity(CurFill * 0.9f);
 	TopFill->SetLightColor(FMath::Lerp(FLinearColor(0.5f, 0.62f, 0.8f), FLinearColor(0.7f, 0.62f, 0.56f), AshAmount));
 
-	const float Thick = (Phase == ETSCPhase::Day && Day >= 3) || bNight ? 1.7f : 1.f;
+	const float Thick = (Phase == ETSCPhase::Day && Day >= 3) || bNight || (bPrologue && ProDusk > 0.5f) ? 1.7f : 1.f;
 	static float CurThick = 1.f;
 	CurThick = FMath::Lerp(CurThick, Thick, K);
 	Fog->SetFogDensity(0.012f * CurThick);
@@ -808,6 +1134,7 @@ void ATSCGameMode::SimEmbers(float Dt)
 void ATSCGameMode::StartGame()
 {
 	if (Phase != ETSCPhase::Title) { return; }
+	EndPrologue();
 	StartDay(1);
 }
 
@@ -875,7 +1202,8 @@ void ATSCGameMode::StartDay(int32 InDay)
 	DayFoodMul = 1.f;
 	if (Day == 1)
 	{
-		ShowBanner(TEXT("Day 1 - Settling in.  Assign your people to wood and food with the panel on the left."), 12.f);
+		bDayOneOnboarding = !bAuto && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("Map_Saga");
+		ShowBanner(TEXT("Three days. One night. Two sagas."), 3.f);
 	}
 	else if (Day == 2)
 	{
@@ -973,9 +1301,17 @@ void ATSCGameMode::EconomyTick()
 
 void ATSCGameMode::AdjustJob(ETSCJob Job, int32 Delta)
 {
+	if (IsFrozen()) { return; }
 	int32& N = Job == ETSCJob::Wood ? NumWood : NumFood;
 	const int32 Idle = Workers.Num() - NumWood - NumFood;
-	if (Delta > 0 && Idle > 0) { ++N; }
+	if (Delta > 0 && Idle > 0)
+	{
+		++N;
+		if (bDayOneOnboarding && Day == 1)
+		{
+			(Job == ETSCJob::Wood ? bAssignedWoodOnDayOne : bAssignedFoodOnDayOne) = true;
+		}
+	}
 	else if (Delta < 0 && N > 0) { --N; }
 	UpdateJobs();
 	float W, F;
@@ -1061,7 +1397,7 @@ int32 ATSCGameMode::FreePlot() const
 
 bool ATSCGameMode::CanBuild(EBuilding Type) const
 {
-	if (Phase != ETSCPhase::Day || FreePlot() < 0 || Wood < BuildCost(Type)) { return false; }
+	if (Phase != ETSCPhase::Day || IsFrozen() || FreePlot() < 0 || Wood < BuildCost(Type)) { return false; }
 	for (const FTSCPlot& P : Plots) { if (P.bUsed && P.Type == Type && (Type == EBuilding::HammerShrine || Type == EBuilding::StagShrine)) { return false; } }
 	return true;
 }
@@ -1146,10 +1482,10 @@ void ATSCGameMode::DefineScenes()
 		S.Title = TEXT("The Boar in the Garden");
 		S.Region = TSCRegion::Garden;
 		S.Alert = TEXT("A boar has broken out of the forest and is charging the vegetable garden!");
-		S.LivingName = TEXT("THE LIVING SAGA - The wooden fence");
-		S.LivingText = TEXT("The boar tramples the crops: -25 food, and the frightened gardeners gather only half as much today. The soil stays rich.");
-		S.AshenName = TEXT("THE ASHEN SAGA - The stone wall");
-		S.AshenText = TEXT("Here the garden was walled in stone after the fires. The boar finds no way in. But ash-poor soil yields a quarter less food for the rest of the saga.");
+		S.LivingName = TEXT("LIVING SAGA - Wooden fence");
+		S.LivingText = TEXT("Lose 25 food to the boar and halve today's harvest. Keep the fertile soil.");
+		S.AshenName = TEXT("ASHEN SAGA - Stone wall");
+		S.AshenText = TEXT("The wall saves the crops. Garden yields drop 25% for the rest of the saga.");
 	}
 	{
 		FTSCScene& S = Scenes[1];
@@ -1482,11 +1818,36 @@ bool ATSCGameMode::CanCut() const
 		&& !bCutOpen && TransitionTimer <= 0.f;
 }
 
+ETSCDayOnePrompt ATSCGameMode::GetDayOnePrompt() const
+{
+	if (!bDayOneOnboarding || Phase != ETSCPhase::Day || Day != 1 || IsFrozen())
+	{
+		return ETSCDayOnePrompt::None;
+	}
+	if (ActiveScene == 0 && !bTriedFirstCut && CanCut()) { return ETSCDayOnePrompt::Cut; }
+	if (ActiveScene >= 0) { return ETSCDayOnePrompt::None; }
+	if (!bAssignedWoodOnDayOne) { return ETSCDayOnePrompt::Wood; }
+	if (!bAssignedFoodOnDayOne) { return ETSCDayOnePrompt::Food; }
+	if (FreePlot() >= 0) { return ETSCDayOnePrompt::Build; }
+	return ETSCDayOnePrompt::None;
+}
+
+bool ATSCGameMode::IsFirstCutFramed() const
+{
+	return bFramingFirstCut && (bCutOpen || TransitionTimer > 0.f);
+}
+
 void ATSCGameMode::PressCut()
 {
 	if (!CanCut()) { return; }
 	bCutOpen = true;
 	SelectedTake = 0;
+	bFramingFirstCut = bDayOneOnboarding && ActiveScene == 0;
+	if (bFramingFirstCut)
+	{
+		bTriedFirstCut = true;
+		SetCameraView(CellF(18.f, 16.5f), 8000.f);
+	}
 }
 
 void ATSCGameMode::ConfirmCut()
@@ -1500,6 +1861,10 @@ void ATSCGameMode::ConfirmCut()
 		for (FTSCScene& S : Scenes) { if (S.Timer < 0.f) { S.Timer = 0.f; } }
 		ApplyAshen(Idx);
 		FinishScene(Idx);
+		if (bFramingFirstCut)
+		{
+			Toast(FString::Printf(TEXT("%d cuts left"), EditsLeft));
+		}
 	}
 }
 
