@@ -12,6 +12,7 @@
 #include "TSCColonyCameraPawn.h"
 #include "TSCGameMode.h"
 #include "TSCHUD.h"
+#include "TSCLoc.h"
 #include "TheSagaCutter.h"
 
 ATSCPlayerController::ATSCPlayerController()
@@ -112,6 +113,7 @@ void ATSCPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ATSCPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &ATSCPlayerController::OnCutKey);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ATSCPlayerController::OnCutKey);
+	InputComponent->BindKey(EKeys::F10, IE_Pressed, this, &ATSCPlayerController::OnLangKey);
 	if (!Cast<UEnhancedInputComponent>(InputComponent))
 	{
 		UE_LOG(LogSaga, Error, TEXT("InputComponent is not an EnhancedInputComponent - check DefaultInput.ini"));
@@ -172,6 +174,11 @@ void ATSCPlayerController::OnCutKey()
 	{
 		Hud->HandleCutKey();
 	}
+}
+
+void ATSCPlayerController::OnLangKey()
+{
+	TSCLoc::Toggle();
 }
 
 void ATSCPlayerController::OnBuildKey(int32 Index)

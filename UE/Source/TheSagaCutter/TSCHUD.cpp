@@ -11,6 +11,7 @@
 #include "Rendering/SlateRenderer.h"
 #include "Styling/CoreStyle.h"
 #include "TSCGameMode.h"
+#include "TSCLoc.h"
 #include "TSCPrimActor.h"
 #include "TSCUnit.h"
 
@@ -35,7 +36,7 @@ namespace
 		return FSlateFontInfo(Roboto.Get(), FMath::Max(6, FMath::RoundToInt(Px)), bBold ? FName("Bold") : FName("Regular"));
 	}
 
-	enum { IdStart = 1, IdRestart, IdCut, IdTakeLiving, IdTakeAshen, IdConfirm, IdSpeed, IdWoodMinus = 10, IdWoodPlus, IdFoodMinus, IdFoodPlus, IdBuild = 20 };
+	enum { IdStart = 1, IdRestart, IdCut, IdTakeLiving, IdTakeAshen, IdConfirm, IdSpeed, IdLang, IdWoodMinus = 10, IdWoodPlus, IdFoodMinus, IdFoodPlus, IdBuild = 20 };
 }
 
 // ----- primitives ---------------------------------------------------------------------------------------------------
@@ -68,6 +69,11 @@ FVector2D ATSCHUD::Measure(const FString& S, float Size, bool bBold) const
 
 void ATSCHUD::Txt(const FString& S, float X, float Y, float Size, const FLinearColor& C, int32 Align, bool bBold)
 {
+	TxtRaw(TSCLoc::Tr(S), X, Y, Size, C, Align, bBold);
+}
+
+void ATSCHUD::TxtRaw(const FString& S, float X, float Y, float Size, const FLinearColor& C, int32 Align, bool bBold)
+{
 	if (!Canvas || S.IsEmpty()) { return; }
 	const FSlateFontInfo Font = MakeFont(Size * U * 0.75f, bBold);
 	float Px = X;
@@ -84,8 +90,9 @@ void ATSCHUD::Txt(const FString& S, float X, float Y, float Size, const FLinearC
 
 float ATSCHUD::Wrapped(const FString& S, float X, float Y, float MaxW, float Size, const FLinearColor& C, bool bBold, int32 Align)
 {
+	const FString T = TSCLoc::Tr(S);
 	TArray<FString> Words;
-	S.ParseIntoArray(Words, TEXT(" "), true);
+	T.ParseIntoArray(Words, TEXT(" "), true);
 	FString Line;
 	float Cy = Y;
 	const float LineH = Size * 1.38f;
@@ -94,7 +101,7 @@ float ATSCHUD::Wrapped(const FString& S, float X, float Y, float MaxW, float Siz
 		const FString Try = Line.IsEmpty() ? W : Line + TEXT(" ") + W;
 		if (Measure(Try, Size, bBold).X > MaxW && !Line.IsEmpty())
 		{
-			Txt(Line, X, Cy, Size, C, Align, bBold);
+			TxtRaw(Line, X, Cy, Size, C, Align, bBold);
 			Cy += LineH;
 			Line = W;
 		}
@@ -105,7 +112,7 @@ float ATSCHUD::Wrapped(const FString& S, float X, float Y, float MaxW, float Siz
 	}
 	if (!Line.IsEmpty())
 	{
-		Txt(Line, X, Cy, Size, C, Align, bBold);
+		TxtRaw(Line, X, Cy, Size, C, Align, bBold);
 		Cy += LineH;
 	}
 	return Cy;
@@ -214,6 +221,7 @@ void ATSCHUD::Act(int32 Id)
 	case IdTakeAshen: GM->SelectTake(1); break;
 	case IdConfirm: GM->ConfirmCut(); break;
 	case IdSpeed: GM->ToggleSpeed(); break;
+	case IdLang: TSCLoc::Toggle(); break;
 	case IdWoodMinus: GM->AdjustJob(ETSCJob::Wood, -1); break;
 	case IdWoodPlus: GM->AdjustJob(ETSCJob::Wood, 1); break;
 	case IdFoodMinus: GM->AdjustJob(ETSCJob::Food, -1); break;
@@ -663,7 +671,7 @@ void ATSCHUD::DrawToasts(ATSCGameMode* GM)
 		const float A = FMath::Clamp(T.Time * 0.8f, 0.f, 1.f);
 		const float W = 520.f;
 		// measure height by drawing transparent first is overkill: assume up to three lines
-		const int32 Lines = FMath::Clamp(FMath::CeilToInt(Measure(T.Text, 15.f, false).X / (W - 28.f) + 0.15f), 1, 4);
+		const int32 Lines = FMath::Clamp(FMath::CeilToInt(Measure(TSCLoc::Tr(T.Text), 15.f, false).X / (W - 28.f) + 0.15f), 1, 4);
 		const float H = Lines * 21.f + 14.f;
 		Y -= H + 6.f;
 		Box(18.f, Y, W, H, FLinearColor(0.02f, 0.015f, 0.01f, 0.78f * A));
@@ -682,7 +690,7 @@ void ATSCHUD::DrawCut(ATSCGameMode* GM)
 	const bool bFirstCut = GM->IsFirstCutFramed();
 	Box(0.f, 0.f, SW, SH, FLinearColor(0.f, 0.f, 0.f, bFirstCut ? 0.28f : 0.62f));
 	Txt(TEXT("CUT!"), SW * 0.5f, bFirstCut ? 87.f : 70.f, bFirstCut ? 42.f : 68.f, CutRed, 1);
-	Txt(TEXT("The world is frozen.  ") + S.Title, SW * 0.5f, bFirstCut ? 140.f : 164.f, 26.f, Parchment, 1);
+	TxtRaw(TSCLoc::Tr(TEXT("The world is frozen.  ")) + TSCLoc::Tr(S.Title), SW * 0.5f, bFirstCut ? 140.f : 164.f, 26.f, Parchment, 1);
 
 	// film strip
 	const float StripY = bFirstCut ? SH - 352.f : 230.f, StripH = bFirstCut ? 248.f : 560.f;
@@ -743,6 +751,10 @@ void ATSCHUD::DrawTitle(ATSCGameMode* GM)
 	}
 	const FLinearColor Col = CutRed;
 	Button(IdStart, SW - 48.f - 290.f, SH - Bar + 20.f, 290.f, 56.f, TEXT("START DAY 1"), true, 22.f, &Col);
+	if (TSCLoc::IsAvailable())
+	{
+		Button(IdLang, SW - 48.f - 290.f - 16.f - 90.f, SH - Bar + 20.f, 90.f, 56.f, TSCLoc::IsRussian() ? TEXT("EN") : TEXT("RU"), true, 22.f);
+	}
 }
 
 void ATSCHUD::DrawEpilogue(ATSCGameMode* GM)

@@ -205,6 +205,11 @@ public:
 	/** Test helper: plays the game by itself. Take pattern is a string of L/A per scene, e.g. "LALA". */
 	UFUNCTION(Exec)
 	void TSCAuto(const FString& Takes, const FString& Build, float Speed);
+	/** Dev-only: "ru" switches the UI to Russian, anything else to English. No-op without UE/DevLoc/ru.tsv. */
+	UFUNCTION(Exec)
+	void TSCLang(const FString& Lang);
+	UFUNCTION(Exec)
+	void TSCLocMisses();
 	UFUNCTION(Exec)
 	void TSCSkip();
 	/** Test helper: press CUT!, select a take (0/1) and optionally confirm. */

@@ -25,6 +25,7 @@
 #include "TSCColonyCameraPawn.h"
 #include "UObject/ConstructorHelpers.h"
 #include "TSCHUD.h"
+#include "TSCLoc.h"
 #include "TSCPlayerController.h"
 #include "TSCPrimActor.h"
 #include "TheSagaCutter.h"
@@ -1418,7 +1419,7 @@ void ATSCGameMode::StartBuild(EBuilding Type)
 	P.Building->SetBuildProgress(0.f);
 	BlockRect(P.Cell.X, P.Cell.Y, W, 2);
 	static const TCHAR* Names[5] = { TEXT("a house"), TEXT("a second sawmill"), TEXT("a healer's hut"), TEXT("a shrine to the Hammer"), TEXT("a shrine to the Stag") };
-	Toast(FString::Printf(TEXT("Your people begin raising %s, tile by tile."), Names[(int32)Type]));
+	Toast(TSCLoc::Fmt(TEXT("Your people begin raising {0}, tile by tile."), { TSCLoc::Tr(Names[(int32)Type]) }));
 	UpdateJobs();
 }
 
@@ -1946,9 +1947,9 @@ void ATSCGameMode::StartNight()
 	NightDefendersLost = 0;
 	EnemiesSlain = 0;
 	ShowBanner(TEXT("The Final Night.  The gate is barred with the last of the timber. Creatures gather in the fog; raiders pull for the shore."), 12.f);
-	Toast(FString::Printf(TEXT("%d wood braces the gate (%d strength).%s%s"), FMath::RoundToInt(Spent), FMath::RoundToInt(GateMaxHP),
-		bHungryNight ? TEXT(" Your defenders are weak with hunger.") : (bFedNight ? TEXT(" Your defenders are well fed.") : TEXT("")),
-		bHammerShrine ? TEXT(" The Hammer blesses their axes.") : TEXT("")));
+	Toast(TSCLoc::Tr(FString::Printf(TEXT("%d wood braces the gate (%d strength)."), FMath::RoundToInt(Spent), FMath::RoundToInt(GateMaxHP)))
+		+ TSCLoc::Tr(bHungryNight ? TEXT(" Your defenders are weak with hunger.") : (bFedNight ? TEXT(" Your defenders are well fed.") : TEXT("")))
+		+ TSCLoc::Tr(bHammerShrine ? TEXT(" The Hammer blesses their axes.") : TEXT("")));
 }
 
 void ATSCGameMode::GetAssaultGoal(const ATSCUnit* U, FVector& OutPos, ETSCStructure& OutStruct) const
@@ -1997,7 +1998,7 @@ void ATSCGameMode::OnUnitDied(ATSCUnit* U)
 {
 	if (U->Team == ETSCTeam::Villager)
 	{
-		if (U->bNamed && Phase == ETSCPhase::Night) { Toast(FString::Printf(TEXT("%s has fallen."), *U->DisplayName)); }
+		if (U->bNamed && Phase == ETSCPhase::Night) { Toast(TSCLoc::Fmt(TEXT("{0} has fallen."), { TSCLoc::Tr(U->DisplayName) })); }
 		if (Phase == ETSCPhase::Night) { ++NightDefendersLost; }
 		else { UpdateJobs(); }
 	}
@@ -2169,15 +2170,15 @@ void ATSCGameMode::BuildEpilogue(bool bHallFell)
 	// what was built
 	if (BuiltNames.Num() > 0)
 	{
-		FString B = BuiltNames[0];
-		if (BuiltNames.Num() > 1) { B += TEXT(" and ") + BuiltNames[1]; }
+		FString B = TSCLoc::Tr(BuiltNames[0]);
+		if (BuiltNames.Num() > 1) { B += TSCLoc::Tr(TEXT(" and ")) + TSCLoc::Tr(BuiltNames[1]); }
 		FString Why;
-		if (bHammerShrine) { Why += TEXT(" The Hammer put weight in every axe."); }
-		if (bStagShrine) { Why += TEXT(" The Stag called some of the fog back into the trees."); }
-		if (ExtraHealers > 0) { Why += TEXT(" The new hut's fires boiled bandages all night."); }
-		if (HousesBuilt > 0) { Why += TEXT(" The newcomers took up shields beside the old families."); }
-		if (ExtraSawmills > 0) { Why += TEXT(" Its timber went into the gate."); }
-		Epilogue.Add(FString::Printf(TEXT("On the empty ground you raised %s.%s"), *B, *Why));
+		if (bHammerShrine) { Why += TSCLoc::Tr(TEXT(" The Hammer put weight in every axe.")); }
+		if (bStagShrine) { Why += TSCLoc::Tr(TEXT(" The Stag called some of the fog back into the trees.")); }
+		if (ExtraHealers > 0) { Why += TSCLoc::Tr(TEXT(" The new hut's fires boiled bandages all night.")); }
+		if (HousesBuilt > 0) { Why += TSCLoc::Tr(TEXT(" The newcomers took up shields beside the old families.")); }
+		if (ExtraSawmills > 0) { Why += TSCLoc::Tr(TEXT(" Its timber went into the gate.")); }
+		Epilogue.Add(TSCLoc::Fmt(TEXT("On the empty ground you raised {0}.{1}"), { B, Why }));
 	}
 	else
 	{
@@ -2218,8 +2219,8 @@ void ATSCGameMode::BuildEpilogue(bool bHallFell)
 	const TArray<FString> Names = { bHakon ? TEXT("Hakon") : TEXT(""), bUlf ? TEXT("Ulf") : TEXT(""), bSigrun ? TEXT("Sigrun") : TEXT(""), bTorvald ? TEXT("Torvald") : TEXT("") };
 	FString Living;
 	int32 NLiving = 0;
-	for (const FString& N : Names) { if (!N.IsEmpty()) { Living += (NLiving++ ? TEXT(", ") : TEXT("")) + N; } }
-	Epilogue.Add(Became + (NLiving > 0 ? FString::Printf(TEXT(" Of the four you knew by name, %s still sit by the fire."), *Living) : TEXT(" Of the four you knew by name, none are left to hear it.")));
+	for (const FString& N : Names) { if (!N.IsEmpty()) { Living += (NLiving++ ? TEXT(", ") : TEXT("")) + TSCLoc::Tr(N); } }
+	Epilogue.Add(TSCLoc::Tr(Became) + (NLiving > 0 ? TSCLoc::Fmt(TEXT(" Of the four you knew by name, {0} still sit by the fire."), { Living }) : TSCLoc::Tr(TEXT(" Of the four you knew by name, none are left to hear it."))));
 	Epilogue.Add(FString::Printf(TEXT("Edits used: %d of %d."), MaxEdits - EditsLeft, MaxEdits));
 }
 
@@ -2234,6 +2235,16 @@ void ATSCGameMode::TSCAuto(const FString& Takes, const FString& Build, float Spe
 	AutoBuild = Build.ToUpper();
 	SpeedMul = FMath::Clamp(Speed, 1.f, 16.f);
 	UE_LOG(LogSaga, Display, TEXT("[Saga] Autoplay takes=%s build=%s speed=%.0f"), *AutoTakes, *AutoBuild, SpeedMul);
+}
+
+void ATSCGameMode::TSCLang(const FString& Lang)
+{
+	TSCLoc::SetRussian(Lang.Equals(TEXT("ru"), ESearchCase::IgnoreCase));
+}
+
+void ATSCGameMode::TSCLocMisses()
+{
+	TSCLoc::DumpMisses();
 }
 
 void ATSCGameMode::TSCCut(int32 Take, int32 bConfirm)

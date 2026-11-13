@@ -37,6 +37,8 @@ private:
 	void Seg(float X1, float Y1, float X2, float Y2, const FLinearColor& C, float Th = 2.f);
 	FVector2D Measure(const FString& S, float Size, bool bBold = true) const;
 	void Txt(const FString& S, float X, float Y, float Size, const FLinearColor& C, int32 Align = 0, bool bBold = true);
+	/** Draws S as given (already translated). */
+	void TxtRaw(const FString& S, float X, float Y, float Size, const FLinearColor& C, int32 Align = 0, bool bBold = true);
 	float Wrapped(const FString& S, float X, float Y, float MaxW, float Size, const FLinearColor& C, bool bBold = false, int32 Align = 0);
 	void WoodPanel(float X, float Y, float W, float H);
 	void Knot(float Cx, float Cy, float R, const FLinearColor& C);

@@ -34,6 +34,7 @@ private:
 	void OnLook(const FInputActionValue& Value);
 	void OnClick();
 	void OnCutKey();
+	void OnLangKey();
 	void OnBuildKey(int32 Index);
 	void OnDragStarted() { bDragging = true; }
 	void OnDragCompleted() { bDragging = false; }
