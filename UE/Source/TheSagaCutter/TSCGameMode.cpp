@@ -6,6 +6,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/PostProcessComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
@@ -18,6 +19,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMaterialLibrary.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "SceneInterface.h"
 #include "Sound/SoundBase.h"
@@ -302,6 +304,15 @@ ATSCUnit* ATSCGameMode::SpawnUnit(ETSCRole InRole, const FString& Name, const FV
 	return U;
 }
 
+// Ultra Dynamic Sky (Blueprint actor, /Game/ThirdParty/UltraDynamicSky): placed in the level or spawned; optional.
+// The level owns it, so a weak pointer is enough.
+static TWeakObjectPtr<AActor> GTSCSky;
+static float GTSCSkyTime = 1100.f;
+static TWeakObjectPtr<USkyLightComponent> GTSCSkyLight; // owned by the atmosphere actor
+static FQuat GTSCDaySun = FRotator(-42.f, -22.f, 0.f).Quaternion(); // where the sun stands on its daily arc (eased)
+static float GTSCSkyDrift = 0.f, GTSCShadowDrift = 0.f; // extra cloud travel earned while the game is fast-forwarded
+static void TSCUpdateSky(UDirectionalLightComponent* Sun, float AshAmount, float K, bool bNight, float DayF, float Thick, float Dt, float SpeedMul);
+
 void ATSCGameMode::BuildAtmosphere()
 {
 	AtmoActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
@@ -322,18 +333,41 @@ void ATSCGameMode::BuildAtmosphere()
 	Sun = MakeLight(FRotator(-42.f, -22.f, 0.f), true);
 	Sun->SetAtmosphereSunLight(false);
 	Sun->SetForwardShadingPriority(3);
-	Fill = MakeLight(FRotator(-30.f, 150.f, 0.f), false);
-	TopFill = MakeLight(FRotator(-88.f, 0.f, 0.f), false);
-	Fill->SetAtmosphereSunLight(false);
-	Fill->SetForwardShadingPriority(2);
-	TopFill->SetAtmosphereSunLight(false);
-	TopFill->SetForwardShadingPriority(1);
+	// ambient: a sky light that captures the sky dome live, so the bounce light follows the sky's colour through the day
+	USkyLightComponent* Sky = NewObject<USkyLightComponent>(AtmoActor);
+	Sky->SetMobility(EComponentMobility::Movable);
+	Sky->SetupAttachment(AtmoRoot);
+	Sky->bRealTimeCapture = true;
+	Sky->bLowerHemisphereIsBlack = false;
+	Sky->SetCastShadows(false);
+	Sky->RegisterComponent();
+	GTSCSkyLight = Sky;
 
 	Fog = NewObject<UExponentialHeightFogComponent>(AtmoActor);
 	Fog->SetupAttachment(AtmoRoot);
 	Fog->RegisterComponent();
 	Fog->SetFogHeightFalloff(0.55f);
 	Fog->SetStartDistance(2000.f);
+
+	// Sky: use the Ultra Dynamic Sky actor placed in the level, or spawn one. The game keeps its own lights and fog;
+	// the sky only follows the game's clock (see UpdateSky). Everything is optional: no asset, no sky.
+	AActor* SkyActor = nullptr;
+	GTSCSkyTime = 1100.f;
+	GTSCSkyDrift = GTSCShadowDrift = 0.f;
+	if (UClass* SkyClass = LoadClass<AActor>(nullptr, TEXT("/Game/ThirdParty/UltraDynamicSky/Blueprints/Ultra_Dynamic_Sky_BP.Ultra_Dynamic_Sky_BP_C")))
+	{
+		for (TActorIterator<AActor> It(GetWorld(), SkyClass); It; ++It) { SkyActor = *It; break; }
+		if (!SkyActor) { SkyActor = GetWorld()->SpawnActor<AActor>(SkyClass, FVector::ZeroVector, FRotator::ZeroRotator); }
+	}
+	GTSCSky = SkyActor;
+	if (SkyActor)
+	{
+		if (FBoolProperty* P = FindFProperty<FBoolProperty>(SkyActor->GetClass(), TEXT("Animate Day/Night Cycle"))) { P->SetPropertyValue_InContainer(SkyActor, false); }
+		if (FBoolProperty* P = FindFProperty<FBoolProperty>(SkyActor->GetClass(), TEXT("Simulate Cloud Density Changes"))) { P->SetPropertyValue_InContainer(SkyActor, false); }
+		Fog->SetFogCutoffDistance(60000.f); // keep the height fog off the sky dome
+		TInlineComponentArray<UPrimitiveComponent*> SkyPrims(SkyActor);
+		for (UPrimitiveComponent* Prim : SkyPrims) { Prim->SetCastShadow(false); }
+	}
 
 	PostFx = NewObject<UPostProcessComponent>(AtmoActor);
 	PostFx->SetupAttachment(AtmoRoot);
@@ -1046,13 +1080,14 @@ void ATSCGameMode::UpdateAtmosphere(float Dt)
 	const float F = Phase == ETSCPhase::Day ? FMath::Clamp(DayTime / DayLength, 0.f, 1.f) : (Phase == ETSCPhase::Title ? (bPrologue ? FMath::Lerp(0.1f, 1.f, ProDusk) : 0.55f) : 1.f);
 	// cold blue-grey day sliding into an orange dusk; the night is a deep blue lit by fires
 	FLinearColor SunCol = FMath::Lerp(FLinearColor(0.62f, 0.74f, 1.f), FLinearColor(1.f, 0.56f, 0.34f), F * F);
-	float SunInt = FMath::Lerp(3.6f, 2.2f, F);
-	float FillInt = FMath::Lerp(1.25f, 0.9f, F);
+	// ambient comes from the sky light only, so the sun's moving shadows read; the sun is a little stronger to hold the overall brightness
+	float SunInt = FMath::Lerp(6.5f, 4.f, F);
+	float FillInt = FMath::Lerp(0.17f, 0.14f, F);
 	if (bNight)
 	{
 		SunCol = FLinearColor(0.35f, 0.48f, 1.f);
 		SunInt = 1.0f;
-		FillInt = 0.5f;
+		FillInt = 4.f; // the night sky is nearly black: lift what little it gives
 	}
 	static float CurSun = 2.f, CurFill = 0.7f;
 	static FLinearColor CurCol(0.6f, 0.7f, 1.f);
@@ -1060,18 +1095,31 @@ void ATSCGameMode::UpdateAtmosphere(float Dt)
 	CurSun = FMath::Lerp(CurSun, SunInt, K);
 	CurFill = FMath::Lerp(CurFill, FillInt, K);
 	CurCol = FMath::Lerp(CurCol, SunCol, K);
-	Sun->SetIntensity(CurSun);
+
+	// the sun crosses the sky over each day: low in the morning, high at noon, low again at dusk, swinging 130 degrees
+	// around the clearing, so the shadows turn and stretch. It follows DayTime, hence also the fast-forward speed.
+	// At night the same light is the moon and settles at a fixed angle.
+	static FQuat CurSunRot = GTSCDaySun;
+	const FRotator DayArc(-(FMath::Lerp(28.f, 22.f, F) + 32.f * FMath::Sin(F * PI)), -22.f + FMath::Lerp(-65.f, 65.f, F), 0.f);
+	GTSCDaySun = FQuat::Slerp(GTSCDaySun, DayArc.Quaternion(), K);
+	CurSunRot = FQuat::Slerp(CurSunRot, bNight ? FRotator(-42.f, -22.f, 0.f).Quaternion() : GTSCDaySun, K);
+	Sun->SetWorldRotation(CurSunRot);
+	// a low sun lights the ground less; make up most of it so mornings and dusks keep the brightness the game was tuned for (42 degrees)
+	const float SunHeight = FMath::Max(-CurSunRot.GetForwardVector().Z, 0.3f);
+	Sun->SetIntensity(CurSun * FMath::Pow(0.669f / SunHeight, 0.6f));
 	Sun->SetLightColor(CurCol);
-	Fill->SetIntensity(CurFill);
-	Fill->SetLightColor(FLinearColor(0.45f, 0.6f, 0.9f));
-	TopFill->SetIntensity(CurFill * 0.9f);
-	TopFill->SetLightColor(FMath::Lerp(FLinearColor(0.5f, 0.62f, 0.8f), FLinearColor(0.7f, 0.62f, 0.56f), AshAmount));
+	if (USkyLightComponent* Sky = GTSCSkyLight.Get())
+	{
+		Sky->SetIntensity(CurFill);
+		Sky->SetLightColor(FMath::Lerp(FLinearColor(0.8f, 0.9f, 1.f), FLinearColor(1.f, 0.9f, 0.8f), AshAmount));
+	}
 
 	const float Thick = (Phase == ETSCPhase::Day && Day >= 3) || bNight || (bPrologue && ProDusk > 0.5f) ? 1.7f : 1.f;
 	static float CurThick = 1.f;
 	CurThick = FMath::Lerp(CurThick, Thick, K);
 	Fog->SetFogDensity(0.012f * CurThick);
 	Fog->SetFogInscatteringColor(FMath::Lerp(FLinearColor(0.16f, 0.23f, 0.30f), FLinearColor(0.24f, 0.21f, 0.19f), AshAmount) * (bNight ? 0.45f : 1.f));
+	TSCUpdateSky(Sun, AshAmount, K, bNight, F, Thick, Dt, SpeedMul);
 
 	// colour drain: the more of the world is Ashen, the greyer it gets; a hard dip while a cut is transitioning
 	float Sat = FMath::Lerp(1.08f, 0.72f, AshAmount);
@@ -1085,6 +1133,69 @@ void ATSCGameMode::UpdateAtmosphere(float Dt)
 	if (bCutOpen) { Sat *= 0.35f; Gain = 0.6f; }
 	PostFx->Settings.ColorSaturation = FVector4(Sat, Sat, Sat, 1.f);
 	PostFx->Settings.ColorGain = FVector4(Gain, Gain * (1.f - 0.04f * AshAmount), Gain * (1.f - 0.1f * AshAmount), 1.f);
+}
+
+// Drives the Ultra Dynamic Sky Blueprint from the game's clock. The Blueprint's variables are set by name, so the C++
+// module does not depend on the asset. Its own Tick pushes them into the sky material every frame.
+static void TSCUpdateSky(UDirectionalLightComponent* Sun, float AshAmount, float K, bool bNight, float DayF, float Thick, float Dt, float SpeedMul)
+{
+	AActor* SkyActor = GTSCSky.Get();
+	if (!SkyActor || !Sun) { return; }
+	UClass* C = SkyActor->GetClass();
+	auto SetNum = [&](const TCHAR* Name, double V)
+	{
+		if (FNumericProperty* P = FindFProperty<FNumericProperty>(C, Name)) { P->SetFloatingPointPropertyValue(P->ContainerPtrToValuePtr<void>(SkyActor), V); }
+	};
+
+	// 0..2400 clock: morning sliding to sunset over the day, then deep night (the epilogue stays dark too)
+	const float TargetTime = bNight ? 2330.f : FMath::Lerp(800.f, 1850.f, DayF);
+	GTSCSkyTime = FMath::Lerp(GTSCSkyTime, TargetTime, K);
+	SetNum(TEXT("Time of Day"), GTSCSkyTime);
+	// the sky's own night is pitch black; lift it so the cloud deck still reads over the fires
+	SetNum(TEXT("Night Brightness"), 0.5f * FMath::GetMappedRangeValueClamped(FVector2f(1850.f, 2330.f), FVector2f(0.f, 1.f), GTSCSkyTime));
+
+	// heavier cloud when the fog thickens, overcast as the world turns Ashen; the Blueprint eases towards the target
+	const float Clouds = FMath::Lerp(Thick > 1.f ? 2.1f : 1.25f, 3.2f, AshAmount);
+	SetNum(TEXT("Cloud Density_target"), Clouds);
+	if (K >= 1.f) { SetNum(TEXT("Cloud Density"), Clouds); }
+	SetNum(TEXT("Saturation"), FMath::Lerp(1.f, 0.35f, AshAmount));
+
+	// cloud shadows: the sky's light-function material goes on the game's own sun and follows the same cloud cover
+	// (the sky's defaults are sized for a far bigger world, so the pattern is scaled down to this clearing)
+	SetNum(TEXT("Cloud Shadows Scale"), 40000.f);
+	SetNum(TEXT("Cloud Shadows Intensity"), bNight ? 0.2f : 0.4f);
+	if (FBoolProperty* P = FindFProperty<FBoolProperty>(C, TEXT("Use Cloud Shadows"))) { P->SetPropertyValue_InContainer(SkyActor, true); }
+	FObjectProperty* ShadowProp = FindFProperty<FObjectProperty>(C, TEXT("Cloud Shadows MID"));
+	if (UMaterialInstanceDynamic* Shadows = ShadowProp ? Cast<UMaterialInstanceDynamic>(ShadowProp->GetObjectPropertyValue_InContainer(SkyActor)) : nullptr)
+	{
+		FNumericProperty* Density = FindFProperty<FNumericProperty>(C, TEXT("Cloud Density"));
+		if (Density) { Shadows->SetScalarParameterValue(TEXT("Cloud Density"), Density->GetFloatingPointPropertyValue(Density->ContainerPtrToValuePtr<void>(SkyActor))); }
+		// fast-forward: the materials run on real time, so the extra travel is added as a time offset (no jump on toggle)
+		float ShadowSpeed = 0.3f;
+		Shadows->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Cloud Speed")), ShadowSpeed);
+		GTSCShadowDrift += Dt * (SpeedMul - 1.f) * ShadowSpeed;
+		Shadows->SetScalarParameterValue(TEXT("Cloud Time Offset"), GTSCShadowDrift);
+		Sun->SetLightFunctionMaterial(Shadows);
+		Sun->SetLightFunctionFadeDistance(1000000.f);
+	}
+
+	FObjectProperty* SkyMatProp = FindFProperty<FObjectProperty>(C, TEXT("UDM_mat"));
+	FNumericProperty* SkySpeed = FindFProperty<FNumericProperty>(C, TEXT("Cloud Speed"));
+	if (UMaterialInstanceDynamic* SkyMat = SkyMatProp ? Cast<UMaterialInstanceDynamic>(SkyMatProp->GetObjectPropertyValue_InContainer(SkyActor)) : nullptr)
+	{
+		const float Speed = SkySpeed ? (float)SkySpeed->GetFloatingPointPropertyValue(SkySpeed->ContainerPtrToValuePtr<void>(SkyActor)) : 0.05f;
+		GTSCSkyDrift += Dt * (SpeedMul - 1.f) * Speed;
+		SkyMat->SetScalarParameterValue(TEXT("Cloud Time Offset"), GTSCSkyDrift);
+	}
+
+	// sun disc: exactly where the game's sun light stands on its daily arc; after dusk it sinks below the horizon
+	FStructProperty* RotProp = FindFProperty<FStructProperty>(C, TEXT("Sun Rotation"));
+	if (RotProp && RotProp->Struct == TBaseStructure<FRotator>::Get())
+	{
+		FRotator R = GTSCDaySun.Rotator();
+		R.Pitch += 40.f * FMath::GetMappedRangeValueClamped(FVector2f(1850.f, 2100.f), FVector2f(0.f, 1.f), GTSCSkyTime);
+		*RotProp->ContainerPtrToValuePtr<FRotator>(SkyActor) = R;
+	}
 }
 
 // =====================================================================================================================
