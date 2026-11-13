@@ -2,11 +2,187 @@
 
 #include "TSCBuilders.h"
 
+#include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "HAL/FileManager.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "TSCPrimActor.h"
+#include "TheSagaCutter.h"
 
 namespace TSC
 {
+	// ----- Viking house kit: data files + assembly ---------------------------------------------------------------------------
+	namespace
+	{
+		struct FKitInst
+		{
+			FString Module;
+			FName Group;  // Shell | Removable | Interior
+			FVector Loc = FVector::ZeroVector;
+			FRotator Rot = FRotator::ZeroRotator;
+			FVector Scale = FVector::OneVector;
+		};
+
+		struct FKitHouse
+		{
+			float Length = 0.f, Width = 0.f, Height = 0.f;
+			TArray<FKitInst> Insts;  // Shell + Removable only
+		};
+
+		TMap<FString, FKitHouse> GKitHouses2;
+		TMap<FString, FString> GKitModulePaths2;
+		TMap<FString, UStaticMesh*> GKitMeshes;
+		TSet<FString> GKitWarned;
+		bool GKitLoaded2 = false;
+		bool GKitOk2 = false;
+
+		/** Reads a tab-separated file; skips blank lines and the "#" header. Returns false if the file is missing. */
+		bool ReadTsv(const TCHAR* Name, TArray<TArray<FString>>& Rows)
+		{
+			TArray<FString> Lines;
+			const FString Path = FPaths::ProjectContentDir() / TEXT("Vikings/Data") / Name;
+			if (!FFileHelper::LoadFileToStringArray(Lines, *Path))
+			{
+				return false;
+			}
+			for (FString& Line : Lines)
+			{
+				if (Line.Len() > 0 && Line[0] == 0xFEFF) { Line.RightChopInline(1); }
+				while (Line.Len() > 0 && (Line[Line.Len() - 1] == TEXT('\r') || Line[Line.Len() - 1] == TEXT('\n'))) { Line.LeftChopInline(1); }
+				if (Line.IsEmpty() || Line[0] == TEXT('#')) { continue; }
+				TArray<FString>& Cols = Rows.AddDefaulted_GetRef();
+				Line.ParseIntoArray(Cols, TEXT("\t"), false);
+			}
+			return true;
+		}
+
+		void KitWarn(const FString& Key, const FString& Msg)
+		{
+			if (!GKitWarned.Contains(Key))
+			{
+				GKitWarned.Add(Key);
+				UE_LOG(LogSaga, Warning, TEXT("Viking house kit: %s - falling back to tile houses."), *Msg);
+			}
+		}
+
+		void LoadKit()
+		{
+			if (GKitLoaded2) { return; }
+			GKitLoaded2 = true;
+			TArray<TArray<FString>> Modules, Houses, Layouts;
+			if (!ReadTsv(TEXT("VikingHouseModules.tsv"), Modules)) { KitWarn(TEXT("f1"), TEXT("VikingHouseModules.tsv is missing")); return; }
+			if (!ReadTsv(TEXT("VikingHouses.tsv"), Houses)) { KitWarn(TEXT("f2"), TEXT("VikingHouses.tsv is missing")); return; }
+			if (!ReadTsv(TEXT("VikingHouseLayouts.tsv"), Layouts)) { KitWarn(TEXT("f3"), TEXT("VikingHouseLayouts.tsv is missing")); return; }
+			for (const TArray<FString>& C : Modules)  // Module, Source, AssetPath, SizeX, SizeY, SizeZ
+			{
+				if (C.Num() >= 3) { GKitModulePaths2.Add(C[0], C[2]); }
+			}
+			for (const TArray<FString>& C : Houses)  // House, Bays, LengthCm, WidthCm, HeightCm
+			{
+				if (C.Num() < 5) { continue; }
+				FKitHouse& H = GKitHouses2.FindOrAdd(C[0]);
+				H.Length = FCString::Atof(*C[2]);
+				H.Width = FCString::Atof(*C[3]);
+				H.Height = FCString::Atof(*C[4]);
+			}
+			for (const TArray<FString>& C : Layouts)  // House, Group, Module, X, Y, Z, Pitch, Yaw, Roll, ScaleX, ScaleY, ScaleZ
+			{
+				if (C.Num() < 12) { continue; }
+				FKitHouse* H = GKitHouses2.Find(C[0]);
+				if (!H) { continue; }
+				FKitInst I;
+				I.Module = C[2];
+				I.Group = FName(*C[1]);
+				I.Loc = FVector(FCString::Atof(*C[3]), FCString::Atof(*C[4]), FCString::Atof(*C[5]));
+				I.Rot = FRotator(FCString::Atof(*C[6]), FCString::Atof(*C[7]), FCString::Atof(*C[8]));
+				I.Scale = FVector(FCString::Atof(*C[9]), FCString::Atof(*C[10]), FCString::Atof(*C[11]));
+				H->Insts.Add(I);
+			}
+			GKitOk2 = GKitHouses2.Num() > 0;
+			UE_LOG(LogSaga, Log, TEXT("Viking house kit: %d houses, %d modules"), GKitHouses2.Num(), GKitModulePaths2.Num());
+		}
+
+		UStaticMesh* KitMesh(const FString& Module)
+		{
+			if (UStaticMesh** Found = GKitMeshes.Find(Module)) { return *Found; }
+			UStaticMesh* Mesh = nullptr;
+			if (const FString* Path = GKitModulePaths2.Find(Module))
+			{
+				Mesh = LoadObject<UStaticMesh>(nullptr, **Path);
+				if (Mesh) { Mesh->AddToRoot(); }
+			}
+			GKitMeshes.Add(Module, Mesh);
+			return Mesh;
+		}
+
+		/**
+		 * Assembles a kit house (Shell + Removable groups) on A, scaled uniformly to fit the W x H cell footprint and centred in
+		 * it, long side along the footprint's long side. One component per module instance (see AddMeshPart): that keeps the
+		 * tile-by-tile rise (build steps), Living/Ashen visibility and the Ashen tint per part. Returns false (building
+		 * nothing) when data or a mesh is missing.
+		 */
+		bool BuildKitHouse(ATSCPrimActor* A, const TCHAR* House, int32 W, int32 H)
+		{
+			LoadKit();
+			if (!GKitOk2) { return false; }
+			const FKitHouse* K = GKitHouses2.Find(House);
+			if (!K || K->Insts.Num() == 0 || K->Length <= 1.f || K->Width <= 1.f)
+			{
+				KitWarn(House, FString::Printf(TEXT("house %s is not in the data"), House));
+				return false;
+			}
+			TArray<UStaticMesh*> Meshes;
+			for (const FKitInst& I : K->Insts)
+			{
+				UStaticMesh* M = KitMesh(I.Module);
+				if (!M && I.Group == FName(TEXT("Interior")))
+				{
+					Meshes.Add(nullptr);  // a missing interior mesh is skipped, the shell still builds
+					continue;
+				}
+				if (!M)
+				{
+					KitWarn(House, FString::Printf(TEXT("mesh for module %s (house %s) is missing"), *I.Module, House));
+					return false;
+				}
+				Meshes.Add(M);
+			}
+
+			const float FW = W * CELL, FH = H * CELL;
+			const bool bTurn = FH > FW;  // long side of the footprint along Y: turn the house
+			const float Fit = bTurn ? FMath::Min(FW / K->Width, FH / K->Length) : FMath::Min(FW / K->Length, FH / K->Width);
+			const FTransform Place(FQuat(FRotator(0.f, bTurn ? 90.f : 0.f, 0.f)), FVector(FW * 0.5f, FH * 0.5f, 4.f), FVector(Fit));
+			TMap<FName, int32> GroupCount;
+			for (int32 N = 0; N < K->Insts.Num(); ++N)
+			{
+				const FKitInst& I = K->Insts[N];
+				if (!Meshes[N]) { continue; }
+				const FTransform T = FTransform(I.Rot, I.Loc, I.Scale) * Place;
+				const int32 Idx = A->AddMeshPart(Meshes[N], T.GetLocation(), T.GetRotation().Rotator(), T.GetScale3D());
+				// Ashen look: the kit material's "Color" vector (if it has one) is multiplied by this grey-brown tint.
+				UStaticMeshComponent* Comp = A->Parts[Idx].Comp;
+				// The group is a component tag ("VH_Shell" / "VH_Removable" / "VH_Interior") so a cutaway can find the parts.
+				Comp->ComponentTags.Add(FName(*(FString(TEXT("VH_")) + I.Group.ToString())));
+				++GroupCount.FindOrAdd(I.Group);
+				if (UMaterialInstanceDynamic* MID = Comp->CreateDynamicMaterialInstance(0))
+				{
+					A->Parts[Idx].MID = MID;
+					A->Parts[Idx].LCol = FLinearColor::White;
+					A->Parts[Idx].ACol = FLinearColor(0.36f, 0.34f, 0.33f);
+				}
+			}
+			if (!GKitWarned.Contains(FString(TEXT("count_")) + House))
+			{
+				GKitWarned.Add(FString(TEXT("count_")) + House);
+				UE_LOG(LogSaga, Log, TEXT("Viking house kit: %s built: Shell=%d Removable=%d Interior=%d components"), House,
+					GroupCount.FindRef(FName(TEXT("Shell"))), GroupCount.FindRef(FName(TEXT("Removable"))), GroupCount.FindRef(FName(TEXT("Interior"))));
+			}
+			return true;
+		}
+	}
+
 	namespace
 	{
 		const float T = 0.07f; // tile thickness (in cube scale units)
@@ -154,6 +330,12 @@ namespace TSC
 
 	void BuildHouse(ATSCPrimActor* A, int32 Seed)
 	{
+		// Kit house by seed (A = 2 bays, B = 3 bays); the tile recipe below is the fallback.
+		if (BuildKitHouse(A, Seed % 2 == 0 ? TEXT("House_Small_A") : TEXT("House_Small_B"), 2, 2))
+		{
+			A->AddLight(FVector(CELL, CELL * 2.f + 70.f, 110.f), Pal::Fire, 2.2f, 0.3f, 420.f);
+			return;
+		}
 		const int32 W = 2, H = 2;
 		for (int32 X = 0; X < W; ++X) { for (int32 Y = 0; Y < H; ++Y) { Floor(A, X, Y, 4.f, Pal::Stone); } }
 		ShellWalls(A, W, H, 4.f, Pal::Timber, Seed % 2, Seed);
@@ -165,6 +347,16 @@ namespace TSC
 	void BuildLonghouse(ATSCPrimActor* A)
 	{
 		const int32 W = 6, H = 3;
+		if (BuildKitHouse(A, TEXT("House_Assembled"), W, H))
+		{
+			// Same lights as the tile longhouse (hearth by the door, glow at the west end); table and benches stay.
+			A->AddLight(FVector(W * CELL * 0.5f, H * CELL + 130.f, 120.f), Pal::Fire, 6.f, 2.5f, 900.f);
+			A->AddLight(FVector(-120.f, H * CELL * 0.5f, 140.f), Pal::Fire, 3.f, 1.f, 600.f);
+			A->AddPart(ETSCShape::Cube, FVector(4.8f * CELL, H * CELL + 110.f, 38.f), FRotator::ZeroRotator, FVector(1.5f, 0.5f, 0.06f), Pal::Plank);
+			A->AddPart(ETSCShape::Cube, FVector(4.8f * CELL, H * CELL + 60.f, 20.f), FRotator::ZeroRotator, FVector(1.4f, 0.16f, 0.05f), Pal::TimberDark);
+			A->AddPart(ETSCShape::Cube, FVector(4.8f * CELL, H * CELL + 160.f, 20.f), FRotator::ZeroRotator, FVector(1.4f, 0.16f, 0.05f), Pal::TimberDark);
+			return;
+		}
 		for (int32 X = 0; X < W; ++X) { for (int32 Y = 0; Y < H; ++Y) { Floor(A, X, Y, 6.f, Pal::Stone); } }
 		// Walls: door in the middle of the south side, lit windows on the south and west.
 		for (int32 X = 0; X < W; ++X)
@@ -222,6 +414,11 @@ namespace TSC
 	void BuildSawmill(ATSCPrimActor* A)
 	{
 		const int32 W = 3, H = 2;
+		if (BuildKitHouse(A, TEXT("House_Sawmill"), W, H))
+		{
+			A->AddLight(FVector(1.5f * CELL, H * CELL + 40.f, 150.f), Pal::Fire, 2.2f, 0.4f, 480.f);
+			return;
+		}
 		for (int32 X = 0; X < W; ++X) { for (int32 Y = 0; Y < H; ++Y) { Floor(A, X, Y, 4.f, Pal::Plank * (0.85f + 0.1f * ((X + Y) % 2))); } }
 		for (int32 X = 0; X < W; ++X) { Wall(A, X, 0, 0, 4.f, Pal::Timber * 0.8f); }
 		Wall(A, W - 1, 0, 1, 4.f, Pal::Timber * 0.8f);
@@ -238,6 +435,11 @@ namespace TSC
 	void BuildHealer(ATSCPrimActor* A)
 	{
 		const int32 W = 2, H = 2;
+		if (BuildKitHouse(A, TEXT("House_Storehouse"), W, H))
+		{
+			A->AddLight(FVector(CELL * 0.5f, CELL * 2.f + 70.f, 110.f), Pal::Fire, 2.2f, 0.3f, 420.f);
+			return;
+		}
 		for (int32 X = 0; X < W; ++X) { for (int32 Y = 0; Y < H; ++Y) { Floor(A, X, Y, 4.f, Pal::Stone); } }
 		ShellWalls(A, W, H, 4.f, Pal::Timber * 1.1f, 0, 1);
 		GableEnds(A, W, H, 4.f + CELL, Pal::Timber);
