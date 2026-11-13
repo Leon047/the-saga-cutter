@@ -2,6 +2,7 @@
 
 #include "TSCBuilders.h"
 
+#include "Engine/StaticMesh.h"
 #include "TSCPrimActor.h"
 
 namespace TSC
@@ -413,15 +414,25 @@ namespace TSC
 	{
 		FRandomStream R(Seed * 7919 + 13);
 		const FLinearColor Green = Pal::Spruce * R.FRandRange(0.75f, 1.35f);
-		const int32 Trunk = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 70.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 1.4f), Pal::TimberDark * 1.2f);
-		A->SetVis(Trunk, ETSCVis::LivingOnly);
-		const float Z[3] = { 170.f, 262.f, 340.f };
-		const float S[3] = { 1.55f, 1.2f, 0.82f };
-		for (int32 I = 0; I < 3; ++I)
+		// The imported pine (12 m tall, pivot at the base) scaled to the old primitive spruce height (~4.8 m).
+		static UStaticMesh* Pine = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Trees/Pine/SM_PineTree.SM_PineTree"));
+		if (Pine)
 		{
-			const int32 C = A->AddPart(ETSCShape::Cone, FVector(0.f, 0.f, Z[I]), FRotator::ZeroRotator, FVector(S[I], S[I], 1.5f - I * 0.15f), Green * (1.f + I * 0.18f));
-			A->SetAshen(C, Pal::Char);
-			A->SetVis(C, ETSCVis::LivingOnly);
+			const int32 PinePart = A->AddMeshPart(Pine, FVector::ZeroVector, FRotator::ZeroRotator, FVector(0.4f));
+			A->SetVis(PinePart, ETSCVis::LivingOnly); // the Ashen Saga shows only the burnt stump
+		}
+		else
+		{
+			const int32 Trunk = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 70.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 1.4f), Pal::TimberDark * 1.2f);
+			A->SetVis(Trunk, ETSCVis::LivingOnly);
+			const float Z[3] = { 170.f, 262.f, 340.f };
+			const float S[3] = { 1.55f, 1.2f, 0.82f };
+			for (int32 I = 0; I < 3; ++I)
+			{
+				const int32 C = A->AddPart(ETSCShape::Cone, FVector(0.f, 0.f, Z[I]), FRotator::ZeroRotator, FVector(S[I], S[I], 1.5f - I * 0.15f), Green * (1.f + I * 0.18f));
+				A->SetAshen(C, Pal::Char);
+				A->SetVis(C, ETSCVis::LivingOnly);
+			}
 		}
 		if (bWithStump)
 		{
