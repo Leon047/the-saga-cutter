@@ -377,12 +377,20 @@ void ATSCGameMode::BuildWorld()
 	}
 
 	// ----- palisade and gate (west) -----
-	// It ends where the north/south log walls placed in Map_Saga (y = -2500 / +2500) meet it.
+	// SM_WoodenFence log sections from the north to the south log wall placed in Map_Saga (y = -2500 / +2500),
+	// broken by the gate. The per-cell actors keep the Ashen stone footing and the path blocking.
+	bool bMeshWall = true;
+	for (const FVector2D& Run : { FVector2D(-2500.f, CellCorner(GateX, GateY).Y), FVector2D(CellCorner(GateX, GateY + 2).Y, 2500.f) })
+	{
+		ATSCPrimActor* P = SpawnPrim(FVector(WallX(), 0.f, 0.f));
+		bMeshWall &= BuildPalisadeRun(P, Run.X, Run.Y, FMath::RoundToInt(Run.X));
+		P->Refresh();
+	}
 	for (int32 Y = -1; Y <= GH; ++Y)
 	{
 		if (Y == GateY || Y == GateY + 1) { continue; }
 		ATSCPrimActor* P = SpawnPrim(CellCorner(GateX, Y));
-		BuildPalisadeCell(P, Y + 20);
+		BuildPalisadeCell(P, Y + 20, !bMeshWall);
 		P->Refresh();
 		SetBlocked(GateX, Y, true);
 	}

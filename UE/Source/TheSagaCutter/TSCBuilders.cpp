@@ -370,10 +370,27 @@ namespace TSC
 		A->AddLight(FVector(W * CELL, 0.f, 170.f), Pal::Fire, 3.f, 0.f, 600.f);
 	}
 
-	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed)
+	bool BuildPalisadeRun(ATSCPrimActor* A, float Y0, float Y1, int32 Seed)
+	{
+		static UStaticMesh* Log = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenFence/SM_WoodenFence.SM_WoodenFence"));
+		if (!Log) { return false; }
+		// The section runs 311 cm along local -Y from its pivot, thickness centred at local x = 15.5 (same as the
+		// north/south walls placed in Map_Saga).
+		const float Len = Y1 - Y0;
+		const int32 N = FMath::Max(1, FMath::RoundToInt(Len / 295.f));
+		const float Step = Len / N;
+		for (int32 I = 0; I < N; ++I)
+		{
+			const float Sz = 0.92f + 0.06f * ((FMath::Abs(Seed) + I * 7) % 4);
+			A->AddMeshPart(Log, FVector(-15.5f, Y0 + Step * (I + 1), 0.f), FRotator::ZeroRotator, FVector(1.f, Step / 311.f * 1.03f, Sz));
+		}
+		return true;
+	}
+
+	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed, bool bLogs)
 	{
 		// A row of sharpened log tiles along the west edge of the cell.
-		for (int32 I = 0; I < 3; ++I)
+		for (int32 I = 0; bLogs && I < 3; ++I)
 		{
 			const float Y = (I + 0.5f) * CELL / 3.f;
 			const float H = 215.f + 26.f * ((Seed * 3 + I * 5) % 4);
@@ -389,7 +406,72 @@ namespace TSC
 
 	void BuildGate(ATSCPrimActor* A, TArray<USceneComponent*>& Pivots)
 	{
-		// Posts, lintel, two door leaves hinged on the posts.
+		static UStaticMesh* Frame = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_Frame.SM_WoodenGate_Frame"));
+		static UStaticMesh* Door = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_Door.SM_WoodenGate_Door"));
+		if (Frame && Door)
+		{
+			// Frame: 783 cm wide along local +Y, scaled to 0.6 (470 cm) and centred on the 400 cm opening, so its
+			// posts stand just outside the hinges.
+			const float FS = 0.6f;
+			const float FrameY0 = CELL - 783.f * FS * 0.5f;
+			A->AddMeshPart(Frame, FVector(0.f, FrameY0, 0.f), FRotator::ZeroRotator, FVector(FS));
+			// Doors: 300 cm wide along local +Y from the hinge, thickness centred at local x = 16, diagonal brace on
+			// the local +X side. Both leaves are turned 180 degrees so the braces face the forest and the plain logs
+			// face the base; the first one is also mirrored (negative Y scale) so it still opens from its own post.
+			const FVector DS(0.75f, CELL / 300.f, 0.62f);
+			const float FaceX = 38.f * DS.X + 3.f; // base-side face of the door
+			// Othala rune of heavy timber beams across both leaves (gate space: y 0..400, z = height). Diamond on top, its
+			// lower sides crossing at the seam into two legs. Every beam ends at the seam, so each half swings
+			// with its own leaf.
+			const FVector2D RTop(CELL, 265.f), RLeft(90.f, 175.f), RCross(CELL, 85.f), RFoot(127.f, 25.f);
+			const FVector2D Sticks[3][2] = { { RTop, RLeft }, { RLeft, RCross }, { RCross, RFoot } };
+			static UStaticMesh* StickMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_GateRuneBeam.SM_GateRuneBeam"));
+			for (int32 I = 0; I < 2; ++I)
+			{
+				USceneComponent* Pivot = A->AddPivot(FVector(0.f, I == 0 ? 0.f : 2.f * CELL, 0.f));
+				A->AddMeshPart(Door, FVector(16.f * DS.X, 0.f, 0.f), FRotator(0.f, 180.f, 0.f), I == 0 ? FVector(DS.X, -DS.Y, DS.Z) : DS, Pivot);
+				for (int32 Segment = 0; Segment < 3; ++Segment)
+				{
+					const FVector2D* S = Sticks[Segment];
+					// Each beam has a rough square-cut end and is trimmed to its own side of the door seam.
+					const FString MiterPath = FString::Printf(TEXT("/Game/Props/WoodenGate/SM_RuneBeam%02d.SM_RuneBeam%02d"), I * 3 + Segment, I * 3 + Segment);
+					if (UStaticMesh* MiterBeam = LoadObject<UStaticMesh>(nullptr, *MiterPath))
+					{
+						A->AddMeshPart(MiterBeam, FVector(FaceX + 7.f, 0.f, 0.f), FRotator::ZeroRotator, FVector::OneVector, Pivot);
+						continue;
+					}
+					// Mirror the left half onto the right leaf, then express it relative to the leaf's hinge.
+					const FVector2D P0 = I == 0 ? S[0] : FVector2D(2.f * CELL - S[0].X, S[0].Y);
+					const FVector2D P1 = I == 0 ? S[1] : FVector2D(2.f * CELL - S[1].X, S[1].Y);
+					const FVector2D D = P1 - P0;
+					const FVector2D Mid = (P0 + P1) * 0.5f - FVector2D(I == 0 ? 0.f : 2.f * CELL, 0.f);
+					if (StickMesh)
+					{
+						// Extracted gate-frame beam: 420 cm along local -Z, with an approximately 60 cm square
+						// cross-section. Start before P0 so the beams overlap at the corners.
+						const FVector2D Dir = D.GetSafeNormal();
+						const FVector2D Start = P0 - Dir * 7.f - FVector2D(I == 0 ? 0.f : 2.f * CELL, 0.f);
+						const FQuat Rot(FVector::ForwardVector, FMath::Atan2(Dir.X, -Dir.Y));
+						A->AddMeshPart(StickMesh, FVector(FaceX + 7.f, Start.X, Start.Y), Rot.Rotator(), FVector(0.5f, 0.5f, (D.Size() + 14.f) / 420.f), Pivot);
+					}
+					else
+					{
+						const FQuat Rot(FVector::ForwardVector, FMath::Atan2(D.Y, D.X));
+						const int32 Stick = A->AddPartQ(ETSCShape::Cube, FVector(FaceX + 6.f, Mid.X, Mid.Y), Rot, FVector(0.24f, (D.Size() + 14.f) / 100.f, 0.34f),
+							Pal::TimberDark * 0.8f, Pivot);
+						A->SetAshen(Stick, Pal::Char);
+					}
+				}
+				Pivots.Add(Pivot);
+				// Torch on top of each post.
+				const float PostY = I == 0 ? FrameY0 + 12.f : 2.f * CELL - FrameY0 - 12.f;
+				const int32 Flame = A->AddPart(ETSCShape::Sphere, FVector(30.f, PostY, 340.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 0.36f), Pal::Fire);
+				A->SetGlow(Flame, FLinearColor(16.f, 6.f, 0.8f), FLinearColor(10.f, 3.f, 0.3f));
+				A->AddLight(FVector(60.f, PostY, 330.f), Pal::Fire, 5.f, 4.f, 800.f);
+			}
+			return;
+		}
+		// Fallback without the gate meshes: posts, lintel, two door leaves hinged on the posts.
 		Post(A, 0.f, 0.f, 0.f, 330.f, Pal::TimberDark, 0.3f);
 		Post(A, 0.f, 2.f * CELL, 0.f, 330.f, Pal::TimberDark, 0.3f);
 		A->AddPart(ETSCShape::Cube, FVector(0.f, CELL, 318.f), FRotator::ZeroRotator, FVector(0.24f, 4.4f, 0.26f), Pal::TimberDark);

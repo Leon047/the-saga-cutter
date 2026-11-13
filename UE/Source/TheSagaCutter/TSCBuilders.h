@@ -53,7 +53,10 @@ namespace TSC
 	/** Crops gets the part indices of the plants, so the boar can trample them. */
 	void BuildGarden(ATSCPrimActor* A, int32 W, int32 H, TArray<int32>& Crops);
 	void BuildDock(ATSCPrimActor* A, int32 W, int32 H, TArray<int32>& Crates);
-	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed);
+	/** One wall cell: the Ashen stone footing, plus primitive log tiles when bLogs (fallback without the log mesh). */
+	void BuildPalisadeCell(ATSCPrimActor* A, int32 Seed, bool bLogs = true);
+	/** SM_WoodenFence log sections along local Y from Y0 to Y1 (actor on the wall line). False if the mesh is missing. */
+	bool BuildPalisadeRun(ATSCPrimActor* A, float Y0, float Y1, int32 Seed);
 	/** Two cells high (in Y). Pivots[0] and Pivots[1] are the door leaves. */
 	void BuildGate(ATSCPrimActor* A, TArray<USceneComponent*>& Pivots);
 	void BuildTree(ATSCPrimActor* A, int32 Seed, bool bWithStump);
