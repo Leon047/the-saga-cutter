@@ -496,7 +496,26 @@ namespace TSC
 		FRandomStream R(Seed * 7919 + 13);
 		const FLinearColor Green = Pal::Spruce * R.FRandRange(0.75f, 1.35f);
 		// The imported pine (12 m tall, pivot at the base) scaled to the old primitive spruce height (~4.8 m).
-		static UStaticMesh* Pine = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Trees/Pine/SM_PineTree.SM_PineTree"));
+		static const TCHAR* const PinePaths[] = {
+			TEXT("/Game/Trees/Pine/SM_PineTree.SM_PineTree"),
+			TEXT("/Game/Trees/Pine2/SM_PineTree2.SM_PineTree2"),
+			TEXT("/Game/Trees/Pine3/SM_PineTree3.SM_PineTree3"),
+		};
+		static const TArray<UStaticMesh*> Pines = []
+		{
+			TArray<UStaticMesh*> Loaded;
+			for (const TCHAR* Path : PinePaths)
+			{
+				if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path))
+				{
+					Mesh->AddToRoot(); // keep the cached variants alive for the whole session
+					Loaded.Add(Mesh);
+				}
+			}
+			return Loaded;
+		}();
+		// The variant comes from its own stream, so the scale/rotation rolls below stay as they were per seed.
+		UStaticMesh* Pine = Pines.Num() > 0 ? Pines[FRandomStream(Seed * 31 + 7).RandRange(0, Pines.Num() - 1)] : nullptr;
 		if (Pine)
 		{
 			const int32 PinePart = A->AddMeshPart(Pine, FVector::ZeroVector, FRotator::ZeroRotator, FVector(0.4f));
