@@ -374,15 +374,18 @@ namespace TSC
 	{
 		static UStaticMesh* Log = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenFence/SM_WoodenFence.SM_WoodenFence"));
 		if (!Log) { return false; }
-		// The section runs 311 cm along local -Y from its pivot, thickness centred at local x = 15.5 (same as the
-		// north/south walls placed in Map_Saga).
+		// The section runs 311 cm along local -Y from its pivot, with its thickness centred at local x = 15.5.
+		// Turn it around so the supports face into the base while keeping the logs on the same wall line.
 		const float Len = Y1 - Y0;
 		const int32 N = FMath::Max(1, FMath::RoundToInt(Len / 295.f));
 		const float Step = Len / N;
 		for (int32 I = 0; I < N; ++I)
 		{
 			const float Sz = 0.92f + 0.06f * ((FMath::Abs(Seed) + I * 7) % 4);
-			A->AddMeshPart(Log, FVector(-15.5f, Y0 + Step * (I + 1), 0.f), FRotator::ZeroRotator, FVector(1.f, Step / 311.f * 1.03f, Sz));
+			const bool bMirror = (I % 2) != 0;
+			const float Width = Step * 1.03f;
+			const float StartY = Y0 + Step * I + (bMirror ? Width : 0.f);
+			A->AddMeshPart(Log, FVector(15.5f, StartY, 0.f), FRotator(0.f, 180.f, 0.f), FVector(1.f, (bMirror ? -Width : Width) / 311.f, Sz));
 		}
 		return true;
 	}
@@ -407,7 +410,7 @@ namespace TSC
 	void BuildGate(ATSCPrimActor* A, TArray<USceneComponent*>& Pivots)
 	{
 		static UStaticMesh* Frame = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_Frame.SM_WoodenGate_Frame"));
-		static UStaticMesh* Door = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_Door.SM_WoodenGate_Door"));
+		static UStaticMesh* Door = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Props/WoodenGate/SM_WoodenGate_DoorPlain.SM_WoodenGate_DoorPlain"));
 		if (Frame && Door)
 		{
 			// Frame: 783 cm wide along local +Y, scaled to 0.6 (470 cm) and centred on the 400 cm opening, so its
@@ -415,9 +418,9 @@ namespace TSC
 			const float FS = 0.6f;
 			const float FrameY0 = CELL - 783.f * FS * 0.5f;
 			A->AddMeshPart(Frame, FVector(0.f, FrameY0, 0.f), FRotator::ZeroRotator, FVector(FS));
-			// Doors: 300 cm wide along local +Y from the hinge, thickness centred at local x = 16, diagonal brace on
-			// the local +X side. Both leaves are turned 180 degrees so the braces face the forest and the plain logs
-			// face the base; the first one is also mirrored (negative Y scale) so it still opens from its own post.
+			// Doors: 300 cm wide along local +Y from the hinge, thickness centred at local x = 16. Both leaves are
+			// turned 180 degrees; the first is also mirrored so each opens from its own post. The plain door mesh
+			// removes the original diagonal braces on the forest-facing side.
 			const FVector DS(0.75f, CELL / 300.f, 0.62f);
 			const float FaceX = 38.f * DS.X + 3.f; // base-side face of the door
 			// Othala rune of heavy timber beams across both leaves (gate space: y 0..400, z = height). Diamond on top, its
