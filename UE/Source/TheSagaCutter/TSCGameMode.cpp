@@ -2,6 +2,7 @@
 
 #include "TSCGameMode.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/PostProcessComponent.h"
@@ -9,7 +10,10 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "TimerManager.h"
 #include "TSCColonyCameraPawn.h"
+#include "UObject/ConstructorHelpers.h"
 #include "TSCHUD.h"
 #include "TSCPlayerController.h"
 #include "TSCPrimActor.h"
@@ -37,6 +41,32 @@ ATSCGameMode::ATSCGameMode()
 	DefaultPawnClass = ATSCColonyCameraPawn::StaticClass();
 	PlayerControllerClass = ATSCPlayerController::StaticClass();
 	HUDClass = ATSCHUD::StaticClass();
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> MenuCue(TEXT("/Game/Vikings/Audio/Music/SC_Menu.SC_Menu"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> DayCue(TEXT("/Game/Vikings/Audio/Music/SC_MainTheme.SC_MainTheme"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> NightCue(TEXT("/Game/Vikings/Audio/Music/SC_Action.SC_Action"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> VictoryCue(TEXT("/Game/Vikings/Audio/Music/SC_Victory.SC_Victory"));
+	MenuMusic = MenuCue.Object;
+	DayMusic = DayCue.Object;
+	NightMusic = NightCue.Object;
+	VictoryMusic = VictoryCue.Object;
+}
+
+void ATSCGameMode::PlayMusic(USoundBase* Sound)
+{
+	if (Sound == CurrentMusic && MusicComp && MusicComp->IsPlaying()) { return; }
+	GetWorldTimerManager().ClearTimer(MusicTimer);
+	if (MusicComp) { MusicComp->FadeOut(MusicFadeTime, 0.f); }  // auto-destroys when the fade ends
+	MusicComp = nullptr;
+	CurrentMusic = Sound;
+	UE_LOG(LogSaga, Display, TEXT("[Saga] Music: %s"), Sound ? *Sound->GetName() : TEXT("none"));
+	if (!Sound) { return; }
+	MusicComp = UGameplayStatics::SpawnSound2D(this, Sound, MusicVolume, 1.f, 0.f, nullptr, false, true);
+	if (MusicComp)
+	{
+		MusicComp->bIsUISound = true;  // keeps playing while the game is paused
+		MusicComp->FadeIn(MusicFadeTime, MusicVolume);
+	}
 }
 
 // =====================================================================================================================
@@ -491,6 +521,7 @@ void ATSCGameMode::BeginPlay()
 	ComputeRates(W, F);
 	WoodRate = FMath::RoundToInt(W);
 	FoodRate = FMath::RoundToInt(F);
+	PlayMusic(MenuMusic);
 }
 
 // =====================================================================================================================
@@ -723,6 +754,7 @@ void ATSCGameMode::AddTracer(const FVector& From, const FVector& To, const FLine
 void ATSCGameMode::StartDay(int32 InDay)
 {
 	Phase = ETSCPhase::Day;
+	PlayMusic(DayMusic);  // keeps the current take running from one day to the next
 	Day = InDay;
 	DayTime = 0.f;
 	DayFlags = 0;
@@ -1371,6 +1403,7 @@ void ATSCGameMode::SetGate(bool bClosed)
 void ATSCGameMode::StartNight()
 {
 	Phase = ETSCPhase::Night;
+	PlayMusic(NightMusic);
 	NightTime = 0.f;
 	DayFlags = 0;
 	BlockRect(TreeX, TreeY + 1, 1, 2, false);
@@ -1576,6 +1609,17 @@ void ATSCGameMode::EndNight(bool bHallFell)
 	}
 	BuildEpilogue(bHallFell);
 	Phase = ETSCPhase::Epilogue;
+	if (!bHallFell && VictoryMusic)
+	{
+		// Victory sting, then the calm theme under the epilogue.
+		PlayMusic(VictoryMusic);
+		GetWorldTimerManager().SetTimer(MusicTimer, FTimerDelegate::CreateWeakLambda(this, [this]() { PlayMusic(MenuMusic); }),
+			FMath::Max(1.f, VictoryMusic->GetDuration()), false);
+	}
+	else
+	{
+		PlayMusic(MenuMusic);
+	}
 	for (const FString& L : Epilogue) { UE_LOG(LogSaga, Display, TEXT("[Epilogue] %s"), *L); }
 }
 

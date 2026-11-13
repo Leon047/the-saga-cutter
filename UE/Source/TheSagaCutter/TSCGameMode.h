@@ -9,6 +9,8 @@
 #include "TSCGameMode.generated.h"
 
 class ATSCPrimActor;
+class UAudioComponent;
+class USoundBase;
 class UDirectionalLightComponent;
 class UExponentialHeightFogComponent;
 class UPostProcessComponent;
@@ -99,6 +101,22 @@ public:
 	/** Seconds between economy ticks. */
 	UPROPERTY(EditAnywhere, Category = "Saga")
 	float EconomyInterval = 5.f;
+
+	// ----- music (Sound Cues pick a random take on each play) ---------------------------------------------------------
+	/** Title screen, and the epilogue after the victory sting or a fallen hall. */
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> MenuMusic;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> DayMusic;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> NightMusic;
+	/** One-shot sting when the hall survives the night. */
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	TObjectPtr<USoundBase> VictoryMusic;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	float MusicVolume = 0.6f;
+	UPROPERTY(EditAnywhere, Category = "Saga|Music")
+	float MusicFadeTime = 1.5f;
 
 	// ----- state read by the HUD --------------------------------------------------------------------------------------
 	ETSCPhase Phase = ETSCPhase::Title;
@@ -220,6 +238,12 @@ private:
 	void SetGate(bool bClosed);
 	void ShowBanner(const FString& Text, float Time);
 	void AutoPlay(float Dt);
+	/** Cross-fades to Sound; does nothing if it is already the current track. */
+	void PlayMusic(USoundBase* Sound);
+
+	UPROPERTY() TObjectPtr<UAudioComponent> MusicComp;
+	UPROPERTY() TObjectPtr<USoundBase> CurrentMusic;
+	FTimerHandle MusicTimer;
 
 	// scenes
 	void DefineScenes();
