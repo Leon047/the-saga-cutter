@@ -22,6 +22,7 @@ UE/enc_temp_folder/
 *.code-workspace
 .vs/
 .vscode/
+UE/.vsconfig
 
 # Compiled outputs
 *.obj

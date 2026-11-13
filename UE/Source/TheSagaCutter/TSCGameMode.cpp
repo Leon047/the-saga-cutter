@@ -435,6 +435,7 @@ void ATSCGameMode::BuildWorld()
 			if (X > 27) { UE_LOG(LogSaga, Warning, TEXT("[Saga] tree loop: X=%d Y=%d forest=%d frame=%d grove=%d"), X, Y, bForest, bFrame, bGroveTree); continue; }
 			if (bForest && (Y == 11 || Y == 12)) { continue; } // forest road
 			if (!bForest && WallDist(CellCenter(X, Y)) < 170.f) { continue; } // keep the palisade clear
+			if (!bForest && (Y == -1 || Y == GH)) { continue; } // north/south log walls (placed in Map_Saga)
 			const float Density = bForest ? (X >= 5 ? 0.42f : 0.62f) : bGroveTree ? 0.4f : 0.5f;
 			if (Rand01(X, Y, 7) > Density)
 			{
