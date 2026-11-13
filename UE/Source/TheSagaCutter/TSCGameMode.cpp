@@ -10,6 +10,9 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMaterialLibrary.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "SceneInterface.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "TSCColonyCameraPawn.h"
@@ -33,6 +36,34 @@ namespace
 	bool InRect(const FIntRect& R, int32 X, int32 Y) { return X >= R.Min.X && X < R.Max.X && Y >= R.Min.Y && Y < R.Max.Y; }
 	uint32 Hash2(int32 X, int32 Y) { return HashCombine(GetTypeHash(X * 73856093), GetTypeHash(Y * 19349663)); }
 	float Rand01(int32 X, int32 Y, int32 Salt = 0) { return (Hash2(X + Salt * 31, Y - Salt * 17) % 10000) / 10000.f; }
+
+	// Feeds the level's wind (the WindDirectionalSource that also drives the banner cloth) into MPC_Wind, which
+	// M_PineTree reads for its sway. The phase is integrated here so a changing wind speed never makes the trees jump.
+	void UpdatePineWind(UWorld* World, float Dt)
+	{
+		static UMaterialParameterCollection* Wind = []
+		{
+			UMaterialParameterCollection* Loaded = LoadObject<UMaterialParameterCollection>(nullptr, TEXT("/Game/Trees/MPC_Wind.MPC_Wind"));
+			if (Loaded) { Loaded->AddToRoot(); }
+			return Loaded;
+		}();
+		if (!Wind || !World || !World->Scene) { return; }
+
+		FVector Dir = FVector::ForwardVector;
+		float Speed = 0.f, MinGust = 0.f, MaxGust = 0.f;
+		World->Scene->GetWindParameters_GameThread(FVector::ZeroVector, Dir, Speed, MinGust, MaxGust);
+
+		static float Phase = 0.f;
+		static float SmoothSpeed = 1.f;
+		static FVector SmoothDir = FVector::ForwardVector;
+		SmoothSpeed = FMath::FInterpTo(SmoothSpeed, Speed, Dt, 1.5f);
+		if (!Dir.IsNearlyZero()) { SmoothDir = FMath::VInterpTo(SmoothDir, Dir.GetSafeNormal(), Dt, 1.5f); }
+		Phase = FMath::Fmod(Phase + Dt * (0.9f + 0.45f * SmoothSpeed), 2000.f * UE_PI);
+
+		UKismetMaterialLibrary::SetScalarParameterValue(World, Wind, TEXT("WindPhase"), Phase);
+		UKismetMaterialLibrary::SetScalarParameterValue(World, Wind, TEXT("WindAmp"), FMath::Clamp(0.45f + 0.3f * SmoothSpeed, 0.3f, 2.f));
+		UKismetMaterialLibrary::SetVectorParameterValue(World, Wind, TEXT("WindDir"), FLinearColor(SmoothDir.X, SmoothDir.Y, 0.f, 0.f));
+	}
 }
 
 ATSCGameMode::ATSCGameMode()
@@ -541,6 +572,7 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	const float RealDt = FMath::Min(DeltaSeconds, 0.1f);
 	WorldTime += RealDt;
+	UpdatePineWind(GetWorld(), RealDt);
 
 	if (!bCameraSet)
 	{
