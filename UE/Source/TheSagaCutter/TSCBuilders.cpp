@@ -427,8 +427,9 @@ namespace TSC
 		{
 			BuildStump(A);
 		}
+		// Uniform size plus a strong height stretch on Z, so the forest mixes squat and tall spruces.
 		const float Sc = R.FRandRange(0.85f, 1.3f);
-		A->SetActorScale3D(FVector(Sc, Sc, Sc * R.FRandRange(0.9f, 1.15f)));
+		A->SetActorScale3D(FVector(Sc, Sc, Sc * R.FRandRange(0.65f, 1.6f)));
 		A->SetActorRotation(FRotator(0.f, R.FRandRange(0.f, 360.f), 0.f));
 	}
 
