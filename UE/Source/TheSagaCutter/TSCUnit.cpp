@@ -41,8 +41,8 @@ namespace
 	/** Height of the figure in cm (named heroes are 12% taller), same as the old primitive figure. */
 	constexpr float VikingHeight = 120.f;
 	// Weapon meshes (Content/Weapons). Several candidates where the folder name may still change:
-	// the axe folder was created with a Cyrillic "А" (U+0410), the arrow folder is spelt "Errow".
-	const TCHAR* const WeaponAxe[] = { TEXT("/Game/Weapons/Axe/Axe_small.Axe_small"), TEXT("/Game/Weapons/Аxe/Axe_small.Axe_small") };
+	// the axe folder was created with a Cyrillic "Рђ" (U+0410), the arrow folder is spelt "Errow".
+	const TCHAR* const WeaponAxe[] = { TEXT("/Game/Weapons/Axe/Axe_small.Axe_small"), TEXT("/Game/Weapons/Рђxe/Axe_small.Axe_small") };
 	const TCHAR* const WeaponSword[] = { TEXT("/Game/Weapons/Sword/Sword.Sword") };
 	const TCHAR* const WeaponShield[] = { TEXT("/Game/Weapons/Shield/Shield_Round.Shield_Round") };
 	const TCHAR* const WeaponBow[] = { TEXT("/Game/Weapons/Bow/Bow_Wooden.Bow_Wooden") };
@@ -73,6 +73,38 @@ namespace
 	const FQuat ArrowMeshRot = AxesToXZ(FVector(0.f, 0.f, 1.f), FVector(1.f, 0.f, 0.f));
 	/** Arrow length as a fraction of the figure height. */
 	constexpr float ArrowSize = 0.4f;
+
+	/** Wildlife in Content/Animals/<Name>: mesh <Name>, clips <Name>AnimalArmature_<Clip>; Length = nose to tail in cm. */
+	struct FTSCAnimalModel
+	{
+		ETSCRole Role;
+		const TCHAR* Name;
+		float Length;
+		const TCHAR* Attack;
+	};
+	const FTSCAnimalModel AnimalModels[] = {
+		{ ETSCRole::Deer, TEXT("Deer"), 140.f, TEXT("Attack_Headbutt") },
+		{ ETSCRole::Stag, TEXT("Stag"), 175.f, TEXT("Attack_Headbutt") },
+		{ ETSCRole::Fox, TEXT("Fox"), 75.f, TEXT("Attack") },
+		{ ETSCRole::Wolf, TEXT("Wolf"), 120.f, TEXT("Attack") },
+		{ ETSCRole::Husky, TEXT("Husky"), 100.f, TEXT("Attack") },
+		{ ETSCRole::Cow, TEXT("Cow"), 210.f, TEXT("Attack_Headbutt") },
+		{ ETSCRole::Bull, TEXT("Bull"), 230.f, TEXT("Attack_Headbutt") },
+	};
+	// Tuning: the animal FBX are assumed to face +Y like the Vikings; units walk along +X.
+	constexpr float AnimalYaw = -90.f;
+	/** Prey flees from a wolf closer than this (cm; 3.5 cells). */
+	constexpr float FleeRadius = 700.f;
+	/** Prey keeps running this long after the last wolf sighting (s). */
+	constexpr float FleeLinger = 2.5f;
+	/** Forest animals run from any person this close (cm; 3 cells). */
+	constexpr float HumanFleeRadius = 600.f;
+	/** The village dog notices the jarl from this far (cm; 3.5 cells). */
+	constexpr float JarlNoticeRadius = 700.f;
+	/** The husky attacks enemies this close to its master (cm; 3 cells). */
+	constexpr float GuardRadius = 600.f;
+	/** Gallop speed while fleeing, relative to the walking speed. */
+	constexpr float FleeSpeedMul = 2.6f;
 }
 
 /**
@@ -123,7 +155,15 @@ void ATSCUnit::Init(ATSCGameMode* InGM, ETSCRole InRole, const FString& InName)
 	case ETSCRole::Creature: Team = ETSCTeam::Creature; MaxHP = 44.f; Damage = 7.f; Speed = 105.f; AttackInterval = 1.5f; AggroRange = 600.f; bFights = true; Height = 170.f; break;
 	case ETSCRole::Raider: Team = ETSCTeam::Raider; MaxHP = 62.f; Damage = 10.f; Speed = 165.f; AttackInterval = 1.25f; AggroRange = 650.f; bFights = true; break;
 	case ETSCRole::Boar: Team = ETSCTeam::Animal; MaxHP = 50.f; Damage = 0.f; Speed = 250.f; Height = 80.f; break;
+	case ETSCRole::Deer: Team = ETSCTeam::Animal; MaxHP = 40.f; Damage = 0.f; Speed = 130.f; Height = 110.f; break;
+	case ETSCRole::Stag: Team = ETSCTeam::Animal; MaxHP = 60.f; Damage = 0.f; Speed = 110.f; Height = 150.f; break;
+	case ETSCRole::Fox: Team = ETSCTeam::Animal; MaxHP = 20.f; Damage = 0.f; Speed = 150.f; Height = 50.f; break;
+	case ETSCRole::Wolf: Team = ETSCTeam::Animal; MaxHP = 50.f; Damage = 0.f; Speed = 150.f; Height = 80.f; break;
+	case ETSCRole::Husky: Team = ETSCTeam::Animal; MaxHP = 40.f; Damage = 7.f; Speed = 230.f; Height = 70.f; AttackRange = 130.f; AttackInterval = 1.0f; AggroRange = 500.f; bFights = true; break;
+	case ETSCRole::Cow: Team = ETSCTeam::Animal; MaxHP = 80.f; Damage = 0.f; Speed = 70.f; Height = 140.f; break;
+	case ETSCRole::Bull: Team = ETSCTeam::Animal; MaxHP = 110.f; Damage = 0.f; Speed = 80.f; Height = 150.f; break;
 	}
+	BaseSpeed = Speed;
 	HP = MaxHP;
 	BuildFigure();
 	Refresh();
@@ -158,7 +198,13 @@ void ATSCUnit::BuildFigure()
 		return;
 	}
 
-	if (Role == ETSCRole::Boar)
+	if (IsWildlife() && BuildAnimal())
+	{
+		return;
+	}
+
+	// Boar (and wildlife whose asset is missing): a primitive quadruped.
+	if (Role == ETSCRole::Boar || IsWildlife())
 	{
 		const FLinearColor Hide(0.13f, 0.08f, 0.05f);
 		AddPart(ETSCShape::Sphere, FVector(0.f, 0.f, 44.f), FRotator::ZeroRotator, FVector(1.0f, 0.56f, 0.56f), Hide, Body);
@@ -334,6 +380,247 @@ bool ATSCUnit::BuildViking(const FLinearColor& Tunic)
 			AddWeapon(DefSword, true);
 		}
 		AddWeapon(DefShield, true);
+	}
+	return true;
+}
+
+bool ATSCUnit::BuildAnimal()
+{
+	const FTSCAnimalModel* Model = nullptr;
+	for (const FTSCAnimalModel& M : AnimalModels) { if (M.Role == Role) { Model = &M; break; } }
+	if (!Model) { return false; }
+	const FString Folder = FString::Printf(TEXT("/Game/Animals/%s"), Model->Name);
+	USkeletalMesh* SkMesh = LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), *Folder, Model->Name, Model->Name));
+	if (!SkMesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Saga] Animal mesh not found: %s/%s (a primitive stand-in is used)"), *Folder, Model->Name);
+		return false;
+	}
+
+	// Fit nose-to-tail length, feet on the ground.
+	const FBox Box = SkMesh->GetImportedBounds().GetBox();
+	const FVector Size = Box.GetSize();
+	const float Scale = Model->Length / (float)FMath::Max3(Size.X, Size.Y, 1.0);
+	UE_LOG(LogTemp, Display, TEXT("[Saga] Animal %s: imported size %s, scale %.3f"), Model->Name, *Size.ToString(), Scale);
+
+	Mesh = NewObject<USkeletalMeshComponent>(this);
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetSkeletalMeshAsset(SkMesh);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetGenerateOverlapEvents(false);
+	Mesh->SetCanEverAffectNavigation(false);
+	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+	Mesh->SetupAttachment(Body);
+	Mesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -Box.Min.Z * Scale), FRotator(0.f, AnimalYaw, 0.f));
+	Mesh->SetRelativeScale3D(FVector(Scale));
+	Mesh->RegisterComponent();
+	AddInstanceComponent(Mesh);
+	AddTintedMaterials(Mesh);
+
+	// Animal clips mapped onto the shared slots: gallop = run, eating = the "work" one-shot while grazing.
+	const TCHAR* Clips[(int32)ETSCAnim::Num] = {};
+	Clips[(int32)ETSCAnim::Idle] = TEXT("Idle");
+	Clips[(int32)ETSCAnim::Walk] = TEXT("Walk");
+	Clips[(int32)ETSCAnim::Run] = TEXT("Gallop");
+	Clips[(int32)ETSCAnim::Slash] = Model->Attack;
+	Clips[(int32)ETSCAnim::PickUp] = TEXT("Eating");
+	Clips[(int32)ETSCAnim::Hit] = TEXT("Idle_HitReact_Left");
+	Clips[(int32)ETSCAnim::Death] = TEXT("Death");
+	Anims.SetNum((int32)ETSCAnim::Num);
+	for (int32 I = 0; I < (int32)ETSCAnim::Num; ++I)
+	{
+		if (!Clips[I]) { continue; }
+		const FString Name = FString::Printf(TEXT("%sAnimalArmature_%s"), Model->Name, Clips[I]);
+		Anims[I] = LoadObject<UAnimSequence>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), *Folder, *Name, *Name));
+	}
+	const float IdleLen = PlayAnim(ETSCAnim::Idle, true);
+	if (IdleLen > 0.f)
+	{
+		Mesh->SetPosition(FMath::Fmod(AnimPhase, IdleLen), false);
+	}
+	return true;
+}
+
+void ATSCUnit::OrderWander(const FVector& Center, float Radius)
+{
+	Order = ETSCOrder::Wander;
+	HoldPos = FVector(Center.X, Center.Y, 0.f);
+	WanderRadius = Radius;
+	WanderGoal = Loc2D();
+	WanderPause = FMath::FRandRange(0.f, 4.f);
+	Leader = nullptr;
+}
+
+bool ATSCUnit::ZoneAllows(const FVector& P) const
+{
+	if (Zone == ETSCZone::Free || !GM) { return true; }
+	return GM->IsInsideSettlement(P) == (Zone == ETSCZone::Inside);
+}
+
+FVector ATSCUnit::PickWanderGoal() const
+{
+	for (int32 Try = 0; Try < 12; ++Try)
+	{
+		const FVector2D R = FMath::RandPointInCircle(WanderRadius);
+		const FVector G = HoldPos + FVector(R.X, R.Y, 0.f);
+		if (ZoneAllows(G)) { return G; }
+	}
+	return Loc2D();
+}
+
+void ATSCUnit::OrderFollow(ATSCUnit* InLeader)
+{
+	Order = ETSCOrder::Follow;
+	Leader = InLeader;
+}
+
+bool ATSCUnit::SimWildlife(float Dt)
+{
+	bGallop = false;
+	if (Role == ETSCRole::Husky) { Speed = BaseSpeed; } // undo the charge speed from a fight
+	if (Order == ETSCOrder::Follow)
+	{
+		ATSCUnit* L = Leader.Get();
+		if (!L || !L->IsAlive())
+		{
+			OrderWander(Loc2D(), 300.f); // master gone: stay and roam here
+			return false;
+		}
+		if (L->IsHidden()) { return false; } // master indoors / aboard: wait
+		// Trot a little behind and to the side of the master; gallop to catch up.
+		const FVector Fwd = L->GetActorForwardVector().GetSafeNormal2D();
+		const FVector Spot = L->Loc2D() - Fwd * 110.f + FVector(-Fwd.Y, Fwd.X, 0.f) * 60.f;
+		const float D = FVector::Dist2D(GetActorLocation(), Spot);
+		if (D < 70.f) { return false; }
+		bGallop = D > 320.f;
+		Speed = bGallop ? 320.f : 180.f;
+		return !StepToward(Spot, Dt, 50.f);
+	}
+
+	// The village dog (a husky on a Wander order): when the jarl is in sight inside the settlement it runs to him,
+	// circles him playfully for a few seconds, then trots off and leaves him alone for a good while.
+	if (Role == ETSCRole::Husky && Order == ETSCOrder::Wander)
+	{
+		PlayCooldown = FMath::Max(0.f, PlayCooldown - Dt);
+		const ATSCUnit* Jarl = GM->GetJarl();
+		const bool bJarlHere = Jarl && Jarl->IsTargetable() && !Jarl->IsHidden() && !Jarl->bDowned && ZoneAllows(Jarl->GetActorLocation());
+		if (PlayTimer <= 0.f && PlayCooldown <= 0.f && bJarlHere && FVector::Dist2D(GetActorLocation(), Jarl->GetActorLocation()) < JarlNoticeRadius)
+		{
+			PlayTimer = FMath::FRandRange(6.f, 9.f);
+			PlayAngle = FMath::FRandRange(0.f, 2.f * PI);
+		}
+		if (PlayTimer > 0.f)
+		{
+			PlayTimer = bJarlHere ? PlayTimer - Dt : 0.f;
+			if (PlayTimer > 0.f)
+			{
+				PlayAngle += Dt * 1.8f;
+				const FVector Spot = Jarl->Loc2D() + FVector(FMath::Cos(PlayAngle), FMath::Sin(PlayAngle), 0.f) * 140.f;
+				const float D = FVector::Dist2D(GetActorLocation(), Spot);
+				bGallop = true;
+				Speed = D > 250.f ? 340.f : 260.f;
+				StepToward(Spot, Dt, 15.f);
+				return true;
+			}
+			// Played enough: wander off and keep away for a while.
+			PlayCooldown = FMath::FRandRange(40.f, 70.f);
+			WanderGoal = PickWanderGoal();
+			WanderPause = 0.f;
+		}
+	}
+
+	// Forest animals (all of them, wolves too) keep away from people: anyone within HumanFleeRadius sends them galloping off.
+	// Never the dogs or the livestock. The wall still stops them (see StepToward), they run along it instead.
+	if (Role == ETSCRole::Deer || Role == ETSCRole::Stag || Role == ETSCRole::Fox || Role == ETSCRole::Wolf)
+	{
+		// Failsafe: a forest animal that finds itself inside the village goes back to its range outside.
+		if (Zone != ETSCZone::Free && !ZoneAllows(GetActorLocation()))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Saga] Forest animal (role %d) found inside the village at %s: sent back to %s"),
+				(int32)Role, *GetActorLocation().ToString(), *HoldPos.ToString());
+			Teleport(HoldPos);
+			Path.Reset();
+		}
+		const FVector Me = Loc2D();
+		float Nearest = HumanFleeRadius;
+		for (const ATSCUnit* H : GM->Units)
+		{
+			if (!H || H->IsWildlife() || H->Team == ETSCTeam::Creature || !H->IsTargetable() || H->IsHidden()) { continue; }
+			const float D = FVector::Dist2D(Me, H->GetActorLocation());
+			if (D < Nearest)
+			{
+				Nearest = D;
+				FleeFrom = H->Loc2D();
+				FleeTimer = FMath::Max(FleeTimer, FleeLinger);
+			}
+		}
+	}
+
+	// Prey: a wolf within range sends deer, the stag and foxes galloping away; they keep running a moment after.
+	if (Role == ETSCRole::Deer || Role == ETSCRole::Stag || Role == ETSCRole::Fox)
+	{
+		const FVector Me = Loc2D();
+		float Nearest = FleeRadius;
+		for (const ATSCUnit* W : GM->GetWildlife())
+		{
+			// predators: wolves and dogs (Hakon's husky and the village one)
+			if (!W || (W->Role != ETSCRole::Wolf && W->Role != ETSCRole::Husky) || !W->IsAlive() || W->IsHidden()) { continue; }
+			const float D = FVector::Dist2D(Me, W->GetActorLocation());
+			if (D < Nearest)
+			{
+				Nearest = D;
+				FleeFrom = W->Loc2D();
+				FleeTimer = FleeLinger;
+			}
+		}
+		if (FleeTimer > 0.f)
+		{
+			FleeTimer -= Dt;
+			FVector Away = (Me - FleeFrom).GetSafeNormal2D();
+			if (Away.IsNearlyZero()) { Away = GetActorForwardVector().GetSafeNormal2D(); }
+			// If the wall is in the way, run along it: turn until the way ahead is open to this animal.
+			for (const float Turn : { 0.f, 40.f, -40.f, 80.f, -80.f, 120.f, -120.f })
+			{
+				const FVector Dir = Away.RotateAngleAxis(Turn, FVector::UpVector);
+				if (ZoneAllows(Me + Dir * 150.f)) { Away = Dir; break; }
+			}
+			bGallop = true;
+			Speed = BaseSpeed * FleeSpeedMul;
+			StepToward(Me + Away * 400.f, Dt, 10.f);
+			if (FleeTimer <= 0.f)
+			{
+				// Safe: calm down and graze where it ended up before heading home again.
+				Speed = BaseSpeed;
+				WanderGoal = Loc2D();
+				WanderPause = FMath::FRandRange(1.f, 3.f);
+			}
+			return true;
+		}
+	}
+
+	// Wander: graze or rest a while, then walk to another spot near home.
+	if (WanderPause > 0.f)
+	{
+		WanderPause -= Dt;
+		return false;
+	}
+	const bool bArrived = StepToward(WanderGoal, Dt, 30.f);
+	if (bZoneBlocked)
+	{
+		// The way leads across the palisade (e.g. through the open gate): give up on this goal.
+		WanderGoal = PickWanderGoal();
+		WanderPause = FMath::FRandRange(0.5f, 2.f);
+		return false;
+	}
+	if (bArrived)
+	{
+		WanderPause = FMath::FRandRange(3.f, 9.f);
+		if (Mesh && FMath::FRand() < 0.6f)
+		{
+			OneShotTimer = FMath::Min(PlayAnim(ETSCAnim::PickUp, false), WanderPause);
+		}
+		WanderGoal = PickWanderGoal();
+		return false;
 	}
 	return true;
 }
@@ -563,7 +850,7 @@ void ATSCUnit::OrderAssault()
 void ATSCUnit::Teleport(const FVector& Pos)
 {
 	CancelTimber();
-	SetActorLocation(FVector(Pos.X, Pos.Y, GM ? -GM->WadeDepthAt(FVector(Pos.X, Pos.Y, 0.f)) : 0.f));
+	SetActorLocation(FVector(Pos.X, Pos.Y, GM ? GM->GroundReliefAt(Pos) - GM->WadeDepthAt(FVector(Pos.X, Pos.Y, 0.f)) : 0.f));
 	LastWadePos = GetActorLocation();
 	Path.Reset();
 }
@@ -579,7 +866,7 @@ void ATSCUnit::UpdateWading(float Dt)
 	if (!GM || bGone || bSheltered || IsHidden()) { return; }
 	const FVector Loc = GetActorLocation();
 	const float Depth = GM->WadeDepthAt(Loc);
-	const float NewZ = FMath::FInterpTo(Loc.Z, -Depth, Dt, 8.f);
+	const float NewZ = FMath::FInterpTo(Loc.Z, GM->GroundReliefAt(Loc) - Depth, Dt, 8.f);
 	if (!FMath::IsNearlyEqual(NewZ, Loc.Z, 0.01f))
 	{
 		SetActorLocation(FVector(Loc.X, Loc.Y, NewZ));
@@ -642,15 +929,21 @@ ATSCUnit* ATSCUnit::FindTarget() const
 	float BestD = AggroRange;
 	const FVector Me = GetActorLocation();
 	const bool bRanged = AttackRange > 300.f;
+	// The husky guards its master: it also fights whatever comes within GuardRadius of him.
+	const ATSCUnit* Master = Role == ETSCRole::Husky ? Leader.Get() : nullptr;
 	for (ATSCUnit* U : GM->Units)
 	{
 		if (!U || U == this || !U->IsTargetable() || U->Team == ETSCTeam::Animal) { continue; }
-		const bool bEnemy = (Team == ETSCTeam::Villager) != (U->Team == ETSCTeam::Villager);
+		const bool bEnemy = Role == ETSCRole::Husky ? (U->Team == ETSCTeam::Creature || U->Team == ETSCTeam::Raider)
+			: (Team == ETSCTeam::Villager) != (U->Team == ETSCTeam::Villager);
 		if (!bEnemy) { continue; }
 		const float D = FVector::Dist2D(Me, U->GetActorLocation());
-		if (D < BestD && (bRanged || GM->CanReach(this, U)))
+		const bool bThreatensMaster = Master && Master->IsAlive() && FVector::Dist2D(Master->GetActorLocation(), U->GetActorLocation()) < GuardRadius;
+		if ((D < BestD || bThreatensMaster) && (bRanged || GM->CanReach(this, U)))
 		{
-			BestD = D;
+			// among candidates pick the closest to the dog
+			if (Best && D >= FVector::Dist2D(Me, Best->GetActorLocation())) { continue; }
+			BestD = FMath::Min(BestD, D);
 			Best = U;
 		}
 	}
@@ -659,6 +952,7 @@ ATSCUnit* ATSCUnit::FindTarget() const
 
 bool ATSCUnit::StepToward(const FVector& Dest, float Dt, float StopDist)
 {
+	bZoneBlocked = false;
 	const FVector Me = Loc2D();
 	if (FVector::Dist2D(Me, Dest) <= StopDist)
 	{
@@ -687,6 +981,12 @@ bool ATSCUnit::StepToward(const FVector& Dest, float Dt, float StopDist)
 		Dir /= Dist;
 		FVector NewLoc = Me + Dir * FMath::Min(Dist, Speed * Dt);
 		NewLoc.Z = GetActorLocation().Z; // keep the wading depth (Me is flattened by Loc2D)
+		if (Zone != ETSCZone::Free && ZoneAllows(Me) && !ZoneAllows(NewLoc))
+		{
+			bZoneBlocked = true; // the palisade is the limit
+			Path.Reset();
+			return false;
+		}
 		SetActorLocation(NewLoc);
 		const FRotator Want = Dir.Rotation();
 		SetActorRotation(FMath::RInterpTo(GetActorRotation(), FRotator(0.f, Want.Yaw, 0.f), Dt, 10.f));
@@ -699,6 +999,27 @@ void ATSCUnit::Sim(float Dt)
 	if (!IsTimberWorker()) { CancelTimber(); }
 	UpdateWading(Dt);
 	UpdateArrows(Dt); // arrows already in the air keep flying even if the hunter falls
+	// TEMP DIAG (remove): weapon state a few seconds in.
+	{
+		static TSet<const ATSCUnit*> Logged;
+		DiagT += Dt;
+		if (Mesh && DiagT > 3.f && !Logged.Contains(this) && (bNamed || Role == ETSCRole::Raider))
+		{
+			Logged.Add(this);
+			TArray<UStaticMeshComponent*> All;
+			for (UStaticMeshComponent* C : ArmedItems) { All.Add(C); }
+			if (HeldItem) { All.Add(HeldItem); }
+			UE_LOG(LogTemp, Warning, TEXT("[WDIAG] %s role=%d armed=%d hidden=%d items=%d meshScale=%s"), *DisplayName, (int32)Role, bArmed, IsHidden(), All.Num(), *Mesh->GetComponentScale().ToString());
+			for (UStaticMeshComponent* C : All)
+			{
+				const FName S = C->GetAttachSocketName();
+				UE_LOG(LogTemp, Warning, TEXT("[WDIAG]   %s socket=%s vis=%d worldScale=%s extent=%s distToSocket=%.1f socketScale=%s"),
+					*GetNameSafe(C->GetStaticMesh()), *S.ToString(), C->IsVisible(), *C->GetComponentScale().ToString(),
+					*C->Bounds.BoxExtent.ToString(), FVector::Dist(C->Bounds.Origin, Mesh->GetSocketLocation(S)),
+					*Mesh->GetSocketTransform(S, RTS_World).GetScale3D().ToString());
+			}
+		}
+	}
 	if (bGone) { return; }
 	if (bDead)
 	{
@@ -766,6 +1087,7 @@ void ATSCUnit::Sim(float Dt)
 			const float D = FVector::Dist2D(GetActorLocation(), TL);
 			if (D > AttackRange)
 			{
+				if (Role == ETSCRole::Husky) { bGallop = true; Speed = 320.f; } // charge in at a gallop
 				StepToward(TL, Dt, AttackRange * 0.85f);
 				bMoving = true;
 			}
@@ -845,6 +1167,10 @@ void ATSCUnit::Sim(float Dt)
 		}
 		bMoving = true;
 		break;
+	case ETSCOrder::Wander:
+	case ETSCOrder::Follow:
+		bMoving = SimWildlife(Dt);
+		break;
 	case ETSCOrder::Assault:
 	{
 		FVector Goal;
@@ -901,7 +1227,7 @@ void ATSCUnit::Animate(float Dt, bool bMoving)
 			PlayAnim(ETSCAnim::Idle, true);
 			return;
 		}
-		const bool bRun = Target.IsValid() || Order == ETSCOrder::Assault || Order == ETSCOrder::Shelter;
+		const bool bRun = bGallop || (!IsWildlife() && (Target.IsValid() || Order == ETSCOrder::Assault || Order == ETSCOrder::Shelter));
 		const bool bCarry = Order == ETSCOrder::Work && WorkPhase == 1 && Role != ETSCRole::Hunter;
 		PlayAnim(bCarry ? (bRun ? ETSCAnim::RunCarry : ETSCAnim::WalkCarry) : (bRun ? ETSCAnim::Run : ETSCAnim::Walk), true);
 		return;

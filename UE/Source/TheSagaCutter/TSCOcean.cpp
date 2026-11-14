@@ -1,6 +1,8 @@
 // The Saga Cutter - game jam project.
 
 #include "TSCOcean.h"
+#include "TSCTerrain.h"
+#include "TSCPrimActor.h"
 
 #include "TheSagaCutter.h"
 #include "TSCBuilders.h"
@@ -20,7 +22,7 @@ namespace
 	struct FTSCWave
 	{
 		FVector2D Dir;
-		float K;  // 2π / wavelength
+		float K;  // 2ПЂ / wavelength
 		float A;  // amplitude
 		float W;  // angular speed, 0.6 * sqrt(980 * K)
 	};
@@ -44,9 +46,12 @@ namespace
 	};
 
 	/** Calm at the shore so the water never pokes through the beach or the dock. D = distance out to sea from the waterline. */
-	float Atten(float D)
+	float Atten(float D, const FVector2D& P)
 	{
-		return FMath::Lerp(0.15f, 1.f, FMath::SmoothStep(0.f, 1600.f, D));
+		const float RiverOpening = ATSCTerrain::RiverMouthCut(P.X, P.Y) / 34.f;
+		const float Beach = 1.f - FMath::SmoothStep(0.06f, 0.97f, RiverOpening);
+		return FMath::Lerp(0.15f, 1.f, FMath::SmoothStep(0.f, 1600.f, D))
+			* FMath::Lerp(1.f, FMath::SmoothStep(-12.f, 65.f, D), Beach);
 	}
 
 	/**
@@ -86,11 +91,20 @@ namespace
 	}
 
 	/** Beach heights: flat top, then a wet slope that crosses the water rest level exactly at the waterline. */
-	constexpr float BeachWestX = 1800.f;
 	constexpr float BeachTopZ = 4.f;
 	constexpr float BeachTopEnd = -20.f;   // top ends this far before the waterline
 	constexpr float BeachToeX = 100.f;     // slope toe this far past the waterline
 	constexpr float BeachToeZ = -20.f;
+
+	float BeachCrest(float Y)
+	{
+		return BeachTopZ + 2.7f * FMath::Sin(Y / 293.f) + 1.6f * FMath::Sin(Y / 96.f + 0.8f);
+	}
+
+	float BeachBack(float Y)
+	{
+		return 1010.f + 72.f * FMath::Sin(Y / 430.f) + 48.f * FMath::Sin(Y / 159.f);
+	}
 
 	USoundBase* LoadAmbience(const TCHAR* Name)
 	{
@@ -138,7 +152,7 @@ float ATSCOcean::HeightAt(const FVector2D& P) const
 	{
 		Sum += Wv.A * FMath::Sin(Wv.K * FVector2D::DotProduct(Wv.Dir, P) - Wv.W * Time);
 	}
-	return SurfaceZ + Atten(P.X - ShoreXAt(P.Y)) * Sum;
+	return SurfaceZ + Atten(P.X - ShoreXAt(P.Y), P) * Sum;
 }
 
 float ATSCOcean::ShoreXAt(float Y) const
@@ -153,7 +167,7 @@ FVector2D ATSCOcean::SlopeAt(const FVector2D& P) const
 	{
 		G += Wv.Dir * (Wv.A * Wv.K * FMath::Cos(Wv.K * FVector2D::DotProduct(Wv.Dir, P) - Wv.W * Time));
 	}
-	return G * Atten(P.X - ShoreXAt(P.Y));
+	return G * Atten(P.X - ShoreXAt(P.Y), P);
 }
 
 void ATSCOcean::Build(float InShoreX, float InSurfaceZ)
@@ -191,10 +205,18 @@ void ATSCOcean::Build(float InShoreX, float InSurfaceZ)
 	{
 		for (int32 Iy = 0; Iy < NY; ++Iy)
 		{
-			Verts.Add(FVector(Xs[Ix], Ys[Iy], SurfaceZ));
+			const float Y = Ys[Iy];
+			const float Mouth = ATSCTerrain::RiverMouthCut(ShoreXAt(Y), Y) / 34.f;
+			// Give the two surfaces room to overlap around the outlet and gravel bar.
+			const float Inland = 1.f - FMath::SmoothStep(ShoreX - 300.f, ShoreX + 100.f, Xs[Ix]);
+			const float X = Xs[Ix] - 420.f * Mouth * Inland;
+			const float Feather = FMath::SmoothStep(0.02f, 0.24f, Mouth)
+				* (1.f - FMath::SmoothStep(ShoreX - 300.f, ShoreX - 100.f, Xs[Ix]));
+			Verts.Add(FVector(X, Y, SurfaceZ));
 			Normals.Add(FVector::UpVector);
-			UV0.Add(FVector2D(Xs[Ix], Ys[Iy]) / 1000.f);
-			Colors.Add(FLinearColor(FMath::Min(XW[Ix], YW[Iy]), 0.f, 0.f, 1.f));
+			UV0.Add(FVector2D(X, Y) / 1000.f);
+			const float RiverOpening = ATSCTerrain::RiverMouthCut(X, Y) / 34.f;
+			Colors.Add(FLinearColor(FMath::Min(XW[Ix], YW[Iy]), RiverOpening, Feather, 1.f));
 			Tangents.Add(FProcMeshTangent(1.f, 0.f, 0.f));
 		}
 	}
@@ -211,13 +233,14 @@ void ATSCOcean::Build(float InShoreX, float InSurfaceZ)
 			Tris.Add(I10); Tris.Add(I01); Tris.Add(I11);
 		}
 	}
-	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, UV0, Colors, Tangents, false);
+	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, UV0, Colors, Tangents, false, false);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCastShadow(false);
 	Mesh->bAffectDistanceFieldLighting = false;
 	Mesh->SetBoundsScale(1.2f);
 
 	BuildBeach();
+	BuildShorePlants();
 
 	// Material: the ocean material, or the flat one in the old water colour.
 	UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Vikings/Environment/Ocean/M_SagaOcean.M_SagaOcean"), nullptr, LOAD_NoWarn | LOAD_Quiet);
@@ -309,6 +332,24 @@ void ATSCOcean::Build(float InShoreX, float InSurfaceZ)
 	}
 }
 
+float ATSCOcean::BeachHeightAt(const FVector2D& P) const
+{
+	const float Waterline = ShoreXAt(P.Y);
+	const float DryEnd = Waterline + BeachTopEnd;
+	const float Back = BeachBack(P.Y);
+	const float Span = FMath::Max(1.f, DryEnd - Back);
+	const float DryT = FMath::Clamp((float(P.X) - Back) / Span, 0.f, 1.f);
+	const float WetT = FMath::Clamp((float(P.X) - DryEnd) / (BeachToeX - BeachTopEnd), 0.f, 1.f);
+	const float Z = P.X <= DryEnd ? FMath::Lerp(-13.f, BeachCrest(P.Y), FMath::SmoothStep(0.f, 0.42f, DryT))
+		: FMath::Lerp(BeachCrest(P.Y), BeachToeZ, WetT);
+	return Z - ATSCTerrain::RiverMouthCut(P.X, P.Y);
+}
+
+void ATSCOcean::HideBeachApron()
+{
+	Beach->SetVisibility(false);
+}
+
 void ATSCOcean::BuildBeach()
 {
 	// Columns along Y: dense where the camera can look, coarse beyond.
@@ -318,64 +359,138 @@ void ATSCOcean::BuildBeach()
 	for (float Y = 7000.f; Y <= 45000.f + 1.f; Y += 500.f) { Ys.Add(Y); }
 	const int32 NY = Ys.Num();
 
-	// Rows in X per column. Section 0 (dry top): a short lip down to the meadow level at the west edge, then the flat top.
-	// Section 1 (wet slope): own vertices, crosses Z = SurfaceZ at the waterline.
-	auto BuildSection = [&](int32 Section, int32 NumRows, TFunctionRef<FVector(int32 Row, float Y)> RowPos)
+	// The back of the beach starts below the meadow and rises gradually through it.
+	// Vertex red supplies wetness, and green matches the grass to the ground beneath the apron.
+	TArray<FVector> Verts, Normals;
+	TArray<FVector2D> UV;
+	TArray<FLinearColor> Colors;
+	TArray<FProcMeshTangent> Tangents;
+	TArray<int32> Tris;
+	constexpr int32 DryRows = 12;
+	constexpr int32 WetRows = 6;
+	for (int32 Row = 0; Row <= DryRows + WetRows; ++Row)
 	{
-		TArray<FVector> Verts;
-		TArray<FVector> Normals;
-		TArray<FVector2D> UV0;
-		TArray<FLinearColor> Colors;
-		TArray<FProcMeshTangent> Tangents;
-		TArray<int32> Tris;
-		// Index = Row * NY + Iy, rows ordered by increasing X (or rising Z for the lip), so the winding matches the ocean grid (+Z / -X faces).
-		for (int32 Row = 0; Row < NumRows; ++Row)
+		for (float Y : Ys)
 		{
-			for (int32 Iy = 0; Iy < NY; ++Iy)
-			{
-				const FVector V = RowPos(Row, Ys[Iy]);
-				Verts.Add(V);
-				Normals.Add(FVector::UpVector);
-				UV0.Add(FVector2D(V.X, V.Y) / 1000.f);
-				Colors.Add(FLinearColor::White);
-				Tangents.Add(FProcMeshTangent(1.f, 0.f, 0.f));
-			}
+			const float Waterline = ShoreXAt(Y);
+			const float DryEnd = Waterline + BeachTopEnd;
+			const float WetT = FMath::Clamp(float(Row - DryRows) / WetRows, 0.f, 1.f);
+			const float DryT = FMath::Min(float(Row) / DryRows, 1.f);
+			const float Back = BeachBack(Y);
+			const float X = Row <= DryRows ? FMath::Lerp(Back, DryEnd, DryT) : Waterline + FMath::Lerp(BeachTopEnd, BeachToeX, WetT);
+			const FVector2D P(X, Y);
+			Verts.Emplace(P, BeachHeightAt(P));
+			Normals.Add(FVector::UpVector);
+			UV.Add(P / 1000.f);
+			const float Wetness = FMath::SmoothStep(-84.f, 40.f, X - Waterline);
+			const float Meadow = 1.f - FMath::SmoothStep(3090.f, 3600.f, FMath::Abs(Y));
+			Colors.Emplace(Wetness, Meadow, 0.f, 1.f);
+			Tangents.Emplace(1.f, 0.f, 0.f);
 		}
-		for (int32 Row = 0; Row < NumRows - 1; ++Row)
+	}
+	for (int32 Row = 0; Row < DryRows + WetRows; ++Row)
+	{
+		for (int32 Iy = 0; Iy < NY - 1; ++Iy)
 		{
-			for (int32 Iy = 0; Iy < NY - 1; ++Iy)
-			{
-				const int32 I00 = Row * NY + Iy;
-				const int32 I01 = I00 + 1;
-				const int32 I10 = I00 + NY;
-				const int32 I11 = I10 + 1;
-				Tris.Add(I00); Tris.Add(I01); Tris.Add(I10);
-				Tris.Add(I10); Tris.Add(I01); Tris.Add(I11);
-			}
+			const int32 A = Row * NY + Iy, B = A + 1, C = A + NY, D = C + 1;
+			Tris.Append({A, B, C, C, B, D});
 		}
-		Beach->CreateMeshSection_LinearColor(Section, Verts, Tris, Normals, UV0, Colors, Tangents, false);
-	};
-	BuildSection(0, 3, [this](int32 Row, float Y)
-	{
-		return Row == 0 ? FVector(BeachWestX, Y, -8.f) : Row == 1 ? FVector(BeachWestX, Y, BeachTopZ) : FVector(ShoreXAt(Y) + BeachTopEnd, Y, BeachTopZ);
-	});
-	BuildSection(1, 2, [this](int32 Row, float Y)
-	{
-		return Row == 0 ? FVector(ShoreXAt(Y) + BeachTopEnd, Y, BeachTopZ) : FVector(ShoreXAt(Y) + BeachToeX, Y, BeachToeZ);
-	});
+	}
+	Beach->ClearAllMeshSections();
+	Beach->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, UV, Colors, Tangents, false, false);
 	Beach->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Beach->SetCastShadow(false);
 	Beach->bAffectDistanceFieldLighting = false;
 
-	if (UMaterialInterface* Flat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Vikings/Environment/M_SagaFlat.M_SagaFlat"), nullptr, LOAD_NoWarn | LOAD_Quiet))
+	UMaterialInterface* Shore = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Vikings/Environment/M_SagaShore.M_SagaShore"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Shore)
 	{
-		UMaterialInstanceDynamic* Dry = UMaterialInstanceDynamic::Create(Flat, this);
-		Dry->SetVectorParameterValue(TEXT("Color"), TSC::Pal::Shore);
-		Beach->SetMaterial(0, Dry);
-		UMaterialInstanceDynamic* Wet = UMaterialInstanceDynamic::Create(Flat, this);
-		Wet->SetVectorParameterValue(TEXT("Color"), TSC::Pal::Shore * 0.6f);
-		Beach->SetMaterial(1, Wet);
+		Shore = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Vikings/Environment/M_SagaFlat.M_SagaFlat"), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
+	if (!Shore) { return; }
+	BeachMID = UMaterialInstanceDynamic::Create(Shore, this);
+	BeachMID->SetVectorParameterValue(TEXT("Color"), TSC::Pal::Shore);
+	BeachMID->SetVectorParameterValue(TEXT("Meadow"), TSC::Pal::Grass);
+	BeachMID->SetVectorParameterValue(TEXT("ForestFloor"), TSC::Pal::ForestFloor * 0.8f);
+	Beach->SetMaterial(0, BeachMID);
+
+	if (BeachCobbles) { BeachCobbles->DestroyComponent(); }
+	BeachCobbles = nullptr;
+	UStaticMesh* Cobbles = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Fab/Nordic_Forest_Cluster_Rock_Small/xjijdiz_tier_2/StaticMeshes/xjijdiz_tier_2.xjijdiz_tier_2"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Cobbles) { return; }
+	BeachCobbles = NewObject<UInstancedStaticMeshComponent>(this);
+	BeachCobbles->SetupAttachment(RootComponent);
+	BeachCobbles->SetStaticMesh(Cobbles);
+	BeachCobbles->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BeachCobbles->SetCanEverAffectNavigation(false);
+	BeachCobbles->SetCastShadow(false);
+	BeachCobbles->RegisterComponent();
+	if (UMaterialInstanceDynamic* Material = BeachCobbles->CreateDynamicMaterialInstance(0))
+	{
+		Material->SetScalarParameterValue(TEXT("MossAmount"), 0.03f);
+	}
+
+	const FBoxSphereBounds Bounds = Cobbles->GetBounds();
+	const double MeshRadius = FMath::Max(1.0, FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y));
+	FRandomStream Random(13793);
+	TArray<FTransform> Instances;
+	for (float Y = -5800.f; Y <= 6800.f; Y += 74.f)
+	{
+		if (FMath::Abs(Y) < 490.f) { continue; } // dock and landing route
+		const float Shoal = 0.52f + 0.27f * FMath::Sin(Y / 239.f) + 0.17f * FMath::Sin(Y / 713.f);
+		if (Random.FRand() > Shoal) { continue; }
+		const int32 Count = Random.RandRange(3, 9);
+		for (int32 I = 0; I < Count; ++I)
+		{
+			const float SampleY = Y + Random.FRandRange(-58.f, 58.f);
+			const float Offset = Random.FRandRange(-330.f, 45.f);
+			const float X = ShoreXAt(SampleY) + Offset;
+			if (ATSCTerrain::RiverMouthCut(X + 260.f, SampleY) > 2.f) { continue; }
+			const float Wet = FMath::Clamp((Offset - BeachTopEnd) / (BeachToeX - BeachTopEnd), 0.f, 1.f);
+			const float Z = FMath::Lerp(BeachCrest(SampleY), BeachToeZ, Wet);
+			const double Scale = Random.FRandRange(8.f, I == 0 ? 49.f : 24.f) / MeshRadius;
+			const FRotator Rotation(0.f, Random.FRandRange(0.f, 360.f), 0.f);
+			Instances.Emplace(Rotation, FVector(X, SampleY, Z + Bounds.BoxExtent.Z * Scale * 0.20) - Rotation.RotateVector(Bounds.Origin * Scale), FVector(Scale));
+		}
+	}
+	BeachCobbles->AddInstances(Instances, false, true);
+	UE_LOG(LogSaga, Display, TEXT("[Saga] Beach cobble clusters: %d"), Instances.Num());
+}
+
+void ATSCOcean::BuildShorePlants()
+{
+	FRandomStream Random(71539);
+	auto Scatter = [&](const TCHAR* Path, const TCHAR* Name, bool bFern) -> UMaterialInstanceDynamic*
+	{
+		UStaticMesh* Plant = LoadObject<UStaticMesh>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (!Plant) { return nullptr; }
+		UInstancedStaticMeshComponent* Plants = NewObject<UInstancedStaticMeshComponent>(this, Name);
+		Plants->SetupAttachment(RootComponent);
+		Plants->SetStaticMesh(Plant);
+		Plants->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Plants->SetCanEverAffectNavigation(false);
+		Plants->RegisterComponent();
+		UMaterialInstanceDynamic* Material = Plants->CreateDynamicMaterialInstance(0);
+		const FBoxSphereBounds Bounds = Plant->GetBounds();
+		const FVector Foot(Bounds.Origin.X, Bounds.Origin.Y, Bounds.Origin.Z - Bounds.BoxExtent.Z);
+		for (float Y = -5700.f; Y <= 6600.f; Y += (bFern ? 365.f : 119.f))
+		{
+			const float JitterY = Y + Random.FRandRange(-45.f, 45.f);
+			const float Edge = 1650.f + 115.f * FMath::Sin(JitterY / 418.f) + 70.f * FMath::Sin(JitterY / 148.f + 0.4f);
+			const float Patch = 0.50f + 0.29f * FMath::Sin(Y / 325.f) + 0.17f * FMath::Sin(Y / 179.f + 1.1f);
+			if (FMath::Abs(JitterY) < 460.f || Random.FRand() > Patch) { continue; }
+			const float X = Edge + Random.FRandRange(bFern ? -190.f : -115.f, bFern ? 0.f : 125.f);
+			if (ATSCTerrain::RiverMouthCut(X + 270.f, JitterY) > 2.f) { continue; }
+			const float Scale = Random.FRandRange(bFern ? 0.21f : 0.37f, bFern ? 0.33f : 0.62f);
+			const FRotator Rotation(0.f, Random.FRandRange(0.f, 360.f), 0.f);
+			const FVector Location = FVector(X, JitterY, -8.f) - Rotation.RotateVector(Foot * Scale);
+			Plants->AddInstance(FTransform(Rotation, Location, FVector(Scale)));
+		}
+		return Material;
+	};
+
+	ShoreGrassMID = Scatter(TEXT("/Game/Vikings/Environment/ShorePlants/SM_Grass05.SM_Grass05"), TEXT("ShoreGrass"), false);
+	ShoreFernMID = Scatter(TEXT("/Game/Vikings/Environment/ShorePlants/SM_Fern02.SM_Fern02"), TEXT("ShoreFerns"), true);
 }
 
 int32 ATSCOcean::AddFloater(AActor* Actor, float HalfLen, float HalfWidth, float RestZ, float FoamRadius, bool bFree)
@@ -398,6 +513,15 @@ int32 ATSCOcean::AddFloater(AActor* Actor, float HalfLen, float HalfWidth, float
 void ATSCOcean::Sim(float Dt, const FTSCOceanInput& In)
 {
 	Time = In.Time;
+	if (BeachMID)
+	{
+		BeachMID->SetVectorParameterValue(TEXT("Meadow"), In.MeadowColor);
+		BeachMID->SetScalarParameterValue(TEXT("Ash"), In.Ash);
+	}
+	const FLinearColor LeafColor = TSC::Pal::Grass * 1.32f;
+	const FLinearColor ShoreFoliage = FMath::Lerp(LeafColor, ATSCPrimActor::Ashify(LeafColor), In.Ash);
+	if (ShoreGrassMID) { ShoreGrassMID->SetVectorParameterValue(TEXT("Color"), ShoreFoliage); }
+	if (ShoreFernMID) { ShoreFernMID->SetVectorParameterValue(TEXT("Color"), ShoreFoliage * 0.85f); }
 
 	// --- Material parameters ---
 	if (MID)
@@ -558,7 +682,8 @@ void ATSCOcean::Sim(float Dt, const FTSCOceanInput& In)
 		D.Vel.Z -= 620.f * Dt;
 		D.Pos += D.Vel * Dt;
 		D.Life -= Dt;
-		if (D.Life <= 0.f || (D.Vel.Z < 0.f && D.Pos.Z < HeightAt(FVector2D(D.Pos))))
+		const double Surface = D.RiverSurface == -BIG_NUMBER ? HeightAt(FVector2D(D.Pos)) : D.RiverSurface;
+		if (D.Life <= 0.f || (D.Vel.Z < 0.f && D.Pos.Z < Surface))
 		{
 			DropSim.RemoveAtSwap(I, 1, EAllowShrinking::No);
 		}
@@ -609,6 +734,22 @@ void ATSCOcean::Splash(const FVector2D& At, float Strength, const FVector2D& Dir
 		D.Life = FMath::FRandRange(0.5f, 0.9f);
 		D.Size = FMath::FRandRange(0.09f, 0.16f) * (0.8f + 0.4f * Strength);
 		DropSim.Add(D);
+	}
+}
+
+void ATSCOcean::RiverSplash(const FVector& At, const FVector2D& Downstream, FRandomStream& Random)
+{
+	const FVector2D Side(-Downstream.Y, Downstream.X);
+	const int32 Count = FMath::Min(Random.RandRange(5, 9), MaxDrops - DropSim.Num());
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		FDrop& Drop = DropSim.AddDefaulted_GetRef();
+		Drop.RiverSurface = At.Z;
+		Drop.Pos = At + FVector(Side * Random.FRandRange(-14.f, 14.f), 3.f);
+		Drop.Vel = FVector(Side * Random.FRandRange(-83.f, 83.f) - Downstream * Random.FRandRange(18.f, 63.f),
+			Random.FRandRange(88.f, 205.f));
+		Drop.Life = Random.FRandRange(0.28f, 0.65f);
+		Drop.Size = Random.FRandRange(0.031f, 0.072f);
 	}
 }
 

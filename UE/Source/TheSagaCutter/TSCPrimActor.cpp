@@ -115,6 +115,18 @@ int32 ATSCPrimActor::AddMeshPart(UStaticMesh* Mesh, const FVector& Loc, const FR
 	return Parts.Add(Part);
 }
 
+void ATSCPrimActor::SetPartMaterial(int32 Idx, UMaterialInterface* Material)
+{
+	FTSCPart& Part = Parts[Idx];
+	if (!Material) { Material = FlatMaterial(); }
+	Part.MID = UMaterialInstanceDynamic::Create(Material, Part.Comp);
+	if (!Part.MID) { return; }
+	for (int32 Slot = 0; Slot < Part.Comp->GetNumMaterials(); ++Slot)
+	{
+		Part.Comp->SetMaterial(Slot, Part.MID);
+	}
+}
+
 USceneComponent* ATSCPrimActor::AddPivot(const FVector& Loc, USceneComponent* Parent)
 {
 	USceneComponent* Pivot = NewObject<USceneComponent>(this);

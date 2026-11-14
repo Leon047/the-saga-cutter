@@ -38,6 +38,8 @@ CREAK = (
     "close and dry, no water splash, no voices."
 )
 WADE = "One single footstep wading through knee-deep calm water, a small soft splash, close, nothing else."
+RAVEN = "A single raven croaking {}, far away across a mountain valley, natural outdoor echo, nothing else."
+OWL = "A single owl hooting {} in a quiet night forest, distant, natural outdoor reverb, nothing else."
 
 SOUNDS = {
     "ocean_loop": {
@@ -62,6 +64,32 @@ SOUNDS = {
     },
     "wade_1": {"seconds": 2, "loop": False, "channels": 1, "prompt": WADE},
     "wade_2": {"seconds": 2, "loop": False, "channels": 1, "prompt": WADE},
+    "river_loop": {
+        "seconds": 30, "loop": True, "channels": 2, "takes": 2,
+        "prompt": (
+            "A small shallow river flowing steadily over stones, gentle continuous babbling water, "
+            "close, cold northern valley. No birds, no voices, no music, no waves. Even level, seamless loop."
+        ),
+    },
+    "wind_loop": {
+        "seconds": 30, "loop": True, "channels": 2, "takes": 2,
+        "prompt": (
+            "Cold wind blowing steadily across a high mountain slope and through distant pines, "
+            "soft airy whoosh with slow gentle swells. No gusty roar, no birds, no voices, no music. "
+            "Even level, seamless loop."
+        ),
+    },
+    "birds_loop": {
+        "seconds": 30, "loop": True, "channels": 2, "takes": 2,
+        "prompt": (
+            "Quiet northern pine forest in the morning, a few small songbirds calling sparsely at a distance, "
+            "light air. No water, no wind noise, no voices, no music. Even level, seamless loop."
+        ),
+    },
+    "raven_1": {"seconds": 4, "loop": False, "channels": 1, "prompt": RAVEN.format("two or three times")},
+    "raven_2": {"seconds": 4, "loop": False, "channels": 1, "prompt": RAVEN.format("one long hoarse croak")},
+    "owl_1": {"seconds": 4, "loop": False, "channels": 1, "prompt": OWL.format("softly twice")},
+    "owl_2": {"seconds": 4, "loop": False, "channels": 1, "prompt": OWL.format("three slow hoots")},
 }
 
 

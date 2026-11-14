@@ -571,6 +571,29 @@ namespace TSC
 		A->bStepParts = false;
 	}
 
+	namespace
+	{
+		UStaticMesh* LoadNaturalMesh(const TCHAR* Path)
+		{
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			if (Mesh) { Mesh->AddToRoot(); }
+			return Mesh;
+		}
+
+		int32 AddNaturalProp(ATSCPrimActor* A, UStaticMesh* Mesh, const FVector& Base,
+			const FRotator& Rotation, const FVector& Size, const FLinearColor& Color)
+		{
+			const FBoxSphereBounds Bounds = Mesh->GetBounds();
+			const FVector Scale = Size / (Bounds.BoxExtent * 2.0).ComponentMax(FVector(1.0));
+			const FVector Foot(Bounds.Origin.X, Bounds.Origin.Y, Bounds.Origin.Z - Bounds.BoxExtent.Z);
+			const int32 Part = A->AddMeshPart(Mesh, Base - Rotation.RotateVector(Foot * Scale), Rotation, Scale);
+			A->Parts[Part].LCol = Color;
+			A->SetAshen(Part, ATSCPrimActor::Ashify(Color));
+			A->SetPartMaterial(Part, nullptr);
+			return Part;
+		}
+	}
+
 	void BuildGarden(ATSCPrimActor* A, int32 W, int32 H, TArray<int32>& Crops)
 	{
 		for (int32 X = 0; X < W; ++X)
@@ -592,6 +615,8 @@ namespace TSC
 		};
 		for (int32 X = 0; X < W; ++X) { Fence(X, 0, 0); Fence(X, H - 1, 2); }
 		for (int32 Y = 0; Y < H; ++Y) { Fence(0, Y, 3); Fence(W - 1, Y, 1); }
+		static UStaticMesh* LeafyCrop = LoadNaturalMesh(TEXT("/Game/Props/VegetablePlants/SM_VegetablePlant_01.SM_VegetablePlant_01"));
+		static UStaticMesh* Sprout = LoadNaturalMesh(TEXT("/Game/Props/VegetablePlants/SM_VegetableSprout.SM_VegetableSprout"));
 		// Crop rows.
 		for (int32 X = 0; X < W; ++X)
 		{
@@ -601,8 +626,10 @@ namespace TSC
 				{
 					const FVector P((X + 0.25f + 0.5f * (I % 2)) * CELL, (Y + 0.25f + 0.5f * (I / 2)) * CELL, 22.f);
 					const bool bCabbage = (X + Y) % 2 == 0;
-					const int32 C = A->AddPart(bCabbage ? ETSCShape::Sphere : ETSCShape::Cone, P, FRotator::ZeroRotator,
-						bCabbage ? FVector(0.34f, 0.34f, 0.26f) : FVector(0.2f, 0.2f, 0.5f),
+					UStaticMesh* Mesh = bCabbage ? LeafyCrop : Sprout;
+					if (!Mesh) { continue; }
+					const int32 C = AddNaturalProp(A, Mesh, P - FVector(0.f, 0.f, 14.f), FRotator(0.f, (X * 43 + Y * 31 + I * 97) % 360, 0.f),
+						bCabbage ? FVector(44.f, 42.f, 36.f) : FVector(38.f, 36.f, 49.f),
 						bCabbage ? FLinearColor(0.18f, 0.42f, 0.1f) : FLinearColor(0.3f, 0.45f, 0.05f));
 					A->SetAshen(C, FLinearColor(0.16f, 0.15f, 0.08f));
 					if ((X * 3 + Y * 5 + I) % 3 == 0) { A->SetVis(C, ETSCVis::LivingOnly); }
@@ -770,7 +797,8 @@ namespace TSC
 	void BuildTree(ATSCPrimActor* A, int32 Seed, bool bWithStump)
 	{
 		FRandomStream R(Seed * 7919 + 13);
-		const FLinearColor Green = Pal::Spruce * R.FRandRange(0.75f, 1.35f);
+		// Keep the existing scale and rotation rolls after removing the primitive pine fallback.
+		R.FRand();
 		// The imported pine (12 m tall, pivot at the base) scaled to the old primitive spruce height (~4.8 m).
 		static const TCHAR* const PinePaths[] = {
 			TEXT("/Game/Trees/Pine/SM_PineTree.SM_PineTree"),
@@ -797,19 +825,6 @@ namespace TSC
 			const int32 PinePart = A->AddMeshPart(Pine, FVector::ZeroVector, FRotator::ZeroRotator, FVector(0.4f));
 			A->SetVis(PinePart, ETSCVis::LivingOnly); // the Ashen Saga shows only the burnt stump
 		}
-		else
-		{
-			const int32 Trunk = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 70.f), FRotator::ZeroRotator, FVector(0.26f, 0.26f, 1.4f), Pal::TimberDark * 1.2f);
-			A->SetVis(Trunk, ETSCVis::LivingOnly);
-			const float Z[3] = { 170.f, 262.f, 340.f };
-			const float S[3] = { 1.55f, 1.2f, 0.82f };
-			for (int32 I = 0; I < 3; ++I)
-			{
-				const int32 C = A->AddPart(ETSCShape::Cone, FVector(0.f, 0.f, Z[I]), FRotator::ZeroRotator, FVector(S[I], S[I], 1.5f - I * 0.15f), Green * (1.f + I * 0.18f));
-				A->SetAshen(C, Pal::Char);
-				A->SetVis(C, ETSCVis::LivingOnly);
-			}
-		}
 		if (bWithStump)
 		{
 			BuildStump(A);
@@ -820,42 +835,46 @@ namespace TSC
 		A->SetActorRotation(FRotator(0.f, R.FRandRange(0.f, 360.f), 0.f));
 	}
 
+
 	void BuildStump(ATSCPrimActor* A)
 	{
-		const int32 Stump = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 22.f), FRotator::ZeroRotator, FVector(0.3f, 0.3f, 0.44f), Pal::Char);
+		static UStaticMesh* Mesh = LoadNaturalMesh(TEXT("/Game/Fab/Nordic_Forest_Tree_Stump_Birch_Medium/th5hcjjfa_tier_2/StaticMeshes/th5hcjjfa_tier_2.th5hcjjfa_tier_2"));
+		if (!Mesh) { return; }
+		const int32 Stump = AddNaturalProp(A, Mesh, FVector::ZeroVector, FRotator::ZeroRotator, FVector(58.f, 55.f, 46.f), Pal::Char);
 		A->SetAshen(Stump, Pal::Char);
+		A->SetGlow(Stump, FLinearColor::Black, FLinearColor(0.18f, 0.039f, 0.004f));
 		A->SetVis(Stump, ETSCVis::AshenOnly);
-		const int32 Ember = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 44.f), FRotator::ZeroRotator, FVector(0.2f, 0.2f, 0.02f), Pal::Char);
-		A->SetGlow(Ember, FLinearColor::Black, FLinearColor(1.6f, 0.35f, 0.03f));
-		A->SetVis(Ember, ETSCVis::AshenOnly);
 	}
 
 	void BuildRock(ATSCPrimActor* A, int32 Seed)
 	{
+		static UStaticMesh* Ledge = LoadNaturalMesh(TEXT("/Game/Fab/Nordic_Forest_Ledge_Rock_Medium/xislecsqx_tier_2/StaticMeshes/xislecsqx_tier_2.xislecsqx_tier_2"));
+		static UStaticMesh* Cluster = LoadNaturalMesh(TEXT("/Game/Fab/Nordic_Forest_Cluster_Rock_Small/xjijdiz_tier_2/StaticMeshes/xjijdiz_tier_2.xjijdiz_tier_2"));
 		FRandomStream R(Seed * 331 + 5);
-		const int32 N = 2 + Seed % 2;
-		for (int32 I = 0; I < N; ++I)
-		{
-			const float S = R.FRandRange(0.5f, 1.1f);
-			A->AddPart(I % 2 ? ETSCShape::Cube : ETSCShape::Sphere, FVector(R.FRandRange(-50.f, 50.f), R.FRandRange(-50.f, 50.f), S * 22.f),
-				FRotator(R.FRandRange(-20.f, 20.f), R.FRandRange(0.f, 90.f), R.FRandRange(-20.f, 20.f)), FVector(S, S * R.FRandRange(0.7f, 1.2f), S * 0.7f),
-				Pal::Stone * R.FRandRange(0.6f, 1.1f));
-		}
+		const FRotator Rotation(0.f, R.FRandRange(0.f, 360.f), 0.f);
+		if (Ledge) { AddNaturalProp(A, Ledge, FVector(-14.f, 0.f, -5.f), Rotation, FVector(137.f, 91.f, 60.f), Pal::Stone * 0.81f); }
+		if (Cluster) { AddNaturalProp(A, Cluster, FVector(46.f, 25.f, -4.f), Rotation, FVector(94.f, 79.f, 28.f), Pal::Stone * 0.69f); }
 	}
 
 	void BuildMushrooms(ATSCPrimActor* A, int32 Seed)
 	{
+		static UStaticMesh* const Meshes[] = {
+			LoadNaturalMesh(TEXT("/Game/Props/Mushrooms/SM_Mushroom_01.SM_Mushroom_01")),
+			LoadNaturalMesh(TEXT("/Game/Props/Mushrooms/SM_Mushroom_03.SM_Mushroom_03")),
+			LoadNaturalMesh(TEXT("/Game/Props/Mushrooms/SM_Mushroom_05.SM_Mushroom_05")),
+		};
 		FRandomStream R(Seed * 97 + 3);
-		const int32 N = 3 + Seed % 3;
+		const int32 N = 3 + FMath::Abs(Seed % 3);
 		for (int32 I = 0; I < N; ++I)
 		{
-			const FVector P(R.FRandRange(-70.f, 70.f), R.FRandRange(-70.f, 70.f), 0.f);
-			const float S = R.FRandRange(0.6f, 1.2f);
-			const int32 Stem = A->AddPart(ETSCShape::Cylinder, P + FVector(0.f, 0.f, 14.f * S), FRotator::ZeroRotator, FVector(0.08f * S, 0.08f * S, 0.28f * S), FLinearColor(0.6f, 0.65f, 0.55f));
-			A->SetAshen(Stem, Pal::Char);
-			const int32 Cap = A->AddPart(ETSCShape::Sphere, P + FVector(0.f, 0.f, 30.f * S), FRotator::ZeroRotator, FVector(0.3f * S, 0.3f * S, 0.16f * S), Pal::Shroom);
-			A->SetAshen(Cap, Pal::Char * 1.5f);
-			A->SetGlow(Cap, FLinearColor(1.2f, 4.5f, 2.4f), FLinearColor::Black); // mushrooms go dark in the Ashen Saga
+			UStaticMesh* Mesh = Meshes[I % UE_ARRAY_COUNT(Meshes)];
+			if (!Mesh) { continue; }
+			const FVector P(R.FRandRange(-67.f, 67.f), R.FRandRange(-67.f, 67.f), 0.f);
+			const float Size = R.FRandRange(0.7f, 1.12f);
+			const int32 Part = AddNaturalProp(A, Mesh, P, FRotator(0.f, R.FRandRange(0.f, 360.f), 0.f),
+				FVector(30.f, 30.f, 35.f) * Size, Pal::Shroom);
+			A->SetAshen(Part, Pal::Char * 1.5f);
+			A->SetGlow(Part, FLinearColor(0.65f, 2.45f, 1.3f), FLinearColor::Black);
 		}
 	}
 
@@ -863,10 +882,11 @@ namespace TSC
 	{
 		const FLinearColor Glow = bHammer ? FLinearColor(10.f, 4.f, 0.5f) : FLinearColor(1.5f, 8.f, 3.5f);
 		const FLinearColor Dim = Glow * 0.25f;
-		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 12.f), FRotator::ZeroRotator, FVector(1.9f, 1.5f, 0.24f), Pal::StoneDark);
-		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 150.f), FRotator(0.f, 0.f, 4.f), FVector(1.05f, 0.3f, 2.7f), Pal::Stone);
-		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 290.f), FRotator(0.f, 0.f, 4.f), FVector(0.8f, 0.3f, 0.5f), Pal::Stone * 0.9f);
-		const float Y = 20.f;
+		static UStaticMesh* Foundation = LoadNaturalMesh(TEXT("/Game/Fab/Nordic_Forest_Cluster_Rock_Small/xjijdiz_tier_2/StaticMeshes/xjijdiz_tier_2.xjijdiz_tier_2"));
+		static UStaticMesh* StandingStone = LoadNaturalMesh(TEXT("/Game/Vikings/Buildings/VikingHouse/Meshes/SM_VH_FND_Boulder_C.SM_VH_FND_Boulder_C"));
+		if (Foundation) { AddNaturalProp(A, Foundation, FVector::ZeroVector, FRotator::ZeroRotator, FVector(190.f, 150.f, 32.f), Pal::StoneDark); }
+		if (StandingStone) { AddNaturalProp(A, StandingStone, FVector(0.f, -13.f, 13.f), FRotator::ZeroRotator, FVector(116.f, 59.f, 297.f), Pal::Stone); }
+		const float Y = 25.f;
 		if (bHammer)
 		{
 			int32 S = A->AddPart(ETSCShape::Cube, FVector(0.f, Y, 150.f), FRotator::ZeroRotator, FVector(0.14f, 0.05f, 1.2f), Pal::Fire);
@@ -899,46 +919,74 @@ namespace TSC
 			A->SetGlow(S, Glow, Dim);
 			S = A->AddPart(ETSCShape::Cube, FVector(28.f, Y + 4.f, 205.f), FRotator(35.f, 0.f, 0.f), FVector(0.09f, 0.05f, 0.75f), Pal::Shroom);
 			A->SetGlow(S, Glow, Dim);
-			// Roots wrapped around the stone.
-			for (int32 I = 0; I < 6; ++I)
+			// The scanned stump's exposed roots form the base of the stag stone.
+			static UStaticMesh* Roots = LoadNaturalMesh(TEXT("/Game/Fab/Nordic_Forest_Tree_Stump_Birch_Medium/th5hcjjfa_tier_2/StaticMeshes/th5hcjjfa_tier_2.th5hcjjfa_tier_2"));
+			if (Roots)
 			{
-				const float Ang = I * 60.f + 15.f;
-				const FVector Dir = FRotator(0.f, Ang, 0.f).Vector();
-				const int32 Rt = A->AddPart(ETSCShape::Cylinder, Dir * 62.f + FVector(0.f, 0.f, 70.f), FRotator(I % 2 ? 28.f : -24.f, Ang, I % 2 ? -22.f : 30.f),
-					FVector(0.14f, 0.14f, 1.7f), Pal::TimberDark * 1.4f);
+				const int32 Rt = AddNaturalProp(A, Roots, FVector(0.f, 0.f, -6.f), FRotator(0.f, 31.f, 0.f),
+					FVector(186.f, 145.f, 49.f), Pal::TimberDark * 1.4f);
 				A->SetAshen(Rt, Pal::Char);
 			}
 			A->AddLight(FVector(0.f, 120.f, 100.f), Pal::Shroom, 3.5f, 0.6f, 700.f);
 		}
 	}
 
-	void BuildLongship(ATSCPrimActor* A)
+	USceneComponent* BuildLongship(ATSCPrimActor* A)
 	{
-		// Hull along X, bow to the east.
-		const int32 Hull = A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 26.f), FRotator::ZeroRotator, FVector(5.2f, 1.1f, 0.5f), Pal::Timber * 1.1f);
-		A->SetAshen(Hull, Pal::Char);
-		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 50.f), FRotator::ZeroRotator, FVector(5.0f, 0.9f, 0.06f), Pal::Plank);
-		for (int32 End = 0; End < 2; ++End)
+		// The imported drakkar (Content/Drakar). Its own materials are kept. Tuning: ShipLength is stem to stern in cm,
+		// ShipYaw turns it if the bow points the wrong way (it must point east, +X); the long axis is found automatically.
+		// (Not cached while null: a failed first load must not stick for the whole session.)
+		static UStaticMesh* Ship = nullptr;
+		if (!Ship) { Ship = LoadNaturalMesh(TEXT("/Game/Drakar/Viking_Ship.Viking_Ship")); }
+		if (Ship)
 		{
-			const float Dir = End == 0 ? -1.f : 1.f;
-			const int32 Prow = A->AddPart(ETSCShape::Cone, FVector(Dir * 300.f, 0.f, 70.f), FRotator(Dir * -55.f, 0.f, 0.f), FVector(0.8f, 0.6f, 1.9f), Pal::Timber);
-			A->SetAshen(Prow, Pal::Char);
+			constexpr float ShipLength = 720.f;
+			constexpr float ShipYaw = 0.f;
+			const FBoxSphereBounds B = Ship->GetBounds();
+			const FVector Size = B.BoxExtent * 2.0;
+			const float Scale = ShipLength / (float)FMath::Max3(Size.X, Size.Y, 1.0);
+			const FRotator Rot(0.f, ShipYaw + (Size.Y > Size.X ? 90.f : 0.f), 0.f);
+			// centred on the actor, keel ShipKeelZ above the actor (the sea sets the actor's own Z; the mesh height includes
+			// the mast, so a share of it must not be used for the draught: the hull is only its lower part)
+			constexpr float ShipKeelZ = 25.f;
+			const FVector Keel(B.Origin.X, B.Origin.Y, B.Origin.Z - B.BoxExtent.Z);
+			const FVector Loc = -Rot.RotateVector(Keel * Scale) + FVector(0.f, 0.f, ShipKeelZ);
+			A->AddMeshPart(Ship, Loc, Rot, FVector(Scale));
+
+			// The sail is a separate mesh (Content/Drakar/Sail). If it was authored in the hull's frame (its centre lies inside
+			// the hull's bounds) it gets the very same transform; otherwise it is fitted onto the mast by size. It is shown
+			// only while the dock is Living.
+			static UStaticMesh* SailMesh = nullptr;
+			if (!SailMesh) { SailMesh = LoadNaturalMesh(TEXT("/Game/Drakar/Sail.Sail")); }
+			const float Top = Size.Z * Scale + ShipKeelZ; // mast top, used to fit the sail if it was not authored in the hull's frame
+			if (SailMesh)
+			{
+				const FBoxSphereBounds SB = SailMesh->GetBounds();
+				const FBox HullBox = FBox::BuildAABB(B.Origin, B.BoxExtent * 1.15);
+				// SailLoc / SailScale: where the sail mesh origin sits on the ship and how big it is.
+				FVector SailLoc = Loc;
+				float SailScale = Scale;
+				if (!HullBox.IsInside(SB.Origin))
+				{
+					SailScale = 0.6f * Top / (float)FMath::Max(SB.BoxExtent.Z * 2.0, 1.0);
+					const FVector Bottom(SB.Origin.X, SB.Origin.Y, SB.Origin.Z - SB.BoxExtent.Z);
+					SailLoc = -Rot.RotateVector(Bottom * SailScale) + FVector(0.f, 0.f, 0.32f * Top);
+				}
+				// The sail hangs on a pivot at its foot: scaling the pivot's Z lowers it onto the deck (see ATSCGameMode).
+				const FVector Foot(SB.Origin.X, SB.Origin.Y, SB.Origin.Z - SB.BoxExtent.Z);
+				const FVector PivotLoc = SailLoc + Rot.RotateVector(Foot * SailScale);
+				USceneComponent* Pivot = A->AddPivot(PivotLoc);
+				const int32 SailPart = A->AddMeshPart(SailMesh, SailLoc - PivotLoc, Rot, FVector(SailScale), Pivot);
+				A->SetVis(SailPart, ETSCVis::LivingOnly);
+				return Pivot;
+			}
+			// No primitive sail either: the old one must never come back.
+			UE_LOG(LogTemp, Error, TEXT("[Saga] /Game/Drakar/Sail could not be loaded: the longship has no sail"));
+			return nullptr;
 		}
-		const int32 Mast = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 230.f), FRotator::ZeroRotator, FVector(0.14f, 0.14f, 3.7f), Pal::TimberDark);
-		A->SetVis(Mast, ETSCVis::LivingOnly);
-		for (int32 I = 0; I < 5; ++I)
-		{
-			const int32 Sail = A->AddPart(ETSCShape::Cube, FVector(-120.f + I * 60.f, 0.f, 270.f), FRotator::ZeroRotator, FVector(0.6f, 0.04f, 2.2f),
-				I % 2 ? FLinearColor(0.6f, 0.56f, 0.48f) : Pal::Red);
-			A->SetVis(Sail, ETSCVis::LivingOnly);
-		}
-		for (int32 I = 0; I < 6; ++I)
-		{
-			const int32 Sh = A->AddPart(ETSCShape::Cylinder, FVector(-200.f + I * 80.f, 58.f, 50.f), FRotator(0.f, 0.f, 90.f), FVector(0.36f, 0.36f, 0.05f),
-				I % 2 ? Pal::Red : FLinearColor(0.5f, 0.38f, 0.06f));
-			A->SetVis(Sh, I % 3 == 0 ? ETSCVis::Both : ETSCVis::LivingOnly);
-			A->SetAshen(Sh, Pal::Char);
-		}
+		// No primitive stand-in: the old drakkar must never come back. A missing asset is an error (see DirectoriesToAlwaysCook).
+		UE_LOG(LogTemp, Error, TEXT("[Saga] /Game/Drakar/Viking_Ship could not be loaded: the longship is missing"));
+		return nullptr;
 	}
 
 	void BuildRaiderBoat(ATSCPrimActor* A)
@@ -964,21 +1012,13 @@ namespace TSC
 
 	void BuildDriftwood(ATSCPrimActor* A, int32 Seed)
 	{
-		// Charred planks, only once the dock has burned.
-		const int32 Count = 2 + (FMath::Abs(Seed) % 2);
-		for (int32 I = 0; I < Count; ++I)
-		{
-			const float R = FMath::Frac(FMath::Sin(Seed * 12.9898f + I * 78.233f) * 43758.5453f);
-			const float Yaw = (R - 0.5f) * 24.f;
-			const int32 Plank = A->AddPart(ETSCShape::Cube, FVector(R * 20.f - 10.f, (I - 0.5f * (Count - 1)) * 26.f, 4.f), FRotator(0.f, Yaw, 0.f),
-				FVector(1.6f, 0.22f, 0.08f), Pal::Char * 1.6f);
-			A->SetAshen(Plank, Pal::Char * 1.6f);
-			A->SetVis(Plank, ETSCVis::AshenOnly);
-			if (I == 0)
-			{
-				A->SetGlow(Plank, FLinearColor(2.f, 0.6f, 0.1f), FLinearColor(2.f, 0.6f, 0.1f));
-			}
-		}
+		static UStaticMesh* Mesh = LoadNaturalMesh(TEXT("/Game/Fab/Coast_African_Debris_Driftwood_S_03/SM_xlnmbce_tier_2/StaticMeshes/SM_xlnmbce_tier_2.SM_xlnmbce_tier_2"));
+		if (!Mesh) { return; }
+		FRandomStream R(Seed * 419 + 9);
+		const int32 Part = AddNaturalProp(A, Mesh, FVector::ZeroVector, FRotator::ZeroRotator,
+			FVector(160.f, 49.f, 23.f) * R.FRandRange(0.8f, 1.15f), Pal::Char * 1.6f);
+		A->SetAshen(Part, Pal::Char * 1.6f);
+		A->SetVis(Part, ETSCVis::AshenOnly);
 	}
 
 	void BuildPlotMarker(ATSCPrimActor* A, int32 W, int32 H)

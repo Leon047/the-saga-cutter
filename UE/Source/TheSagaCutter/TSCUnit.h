@@ -17,11 +17,15 @@ class UMaterialInstanceDynamic;
 enum class ETSCAnim : uint8 { Idle, Walk, Run, WalkCarry, RunCarry, Slash, Shoot, Punch, PickUp, Hit, Death, Num };
 
 enum class ETSCTeam : uint8 { Villager, Creature, Raider, Animal };
-enum class ETSCRole : uint8 { Worker, Hunter, Woodcutter, Healer, Shield, Creature, Raider, Boar };
+/** Deer..Bull: wildlife and livestock from Content/Animals (team Animal, never fight, not targeted). Keep Deer first: IsWildlife() is Role >= Deer. */
+enum class ETSCRole : uint8 { Worker, Hunter, Woodcutter, Healer, Shield, Creature, Raider, Boar, Deer, Stag, Fox, Wolf, Husky, Cow, Bull };
 enum class ETSCJob : uint8 { Idle, Wood, Food };
 enum class ETSCNeed : uint8 { None, Wood, Leaf, Heal };
-enum class ETSCOrder : uint8 { Work, Hold, Shelter, Leave, Assault };
+/** Wander: roam around HoldPos (graze, rest, move on). Follow: keep near Leader (the hunter's dog). */
+enum class ETSCOrder : uint8 { Work, Hold, Shelter, Leave, Assault, Wander, Follow };
 enum class ETSCStructure : uint8 { None, Gate, Longhouse };
+/** Wildlife confinement relative to the palisade: Outside = forest animals (never cross the wall inwards), Inside = livestock (never leave). */
+enum class ETSCZone : uint8 { Free, Outside, Inside };
 
 /** An arrow mesh in flight from the hunter's bow to the target (purely visual, damage is dealt on release). */
 struct FTSCArrowFlight
@@ -62,6 +66,11 @@ public:
 	void OrderShelter(const FVector& Pos);
 	void OrderLeave(const FVector& Pos);
 	void OrderAssault();
+	/** Wildlife: roam within Radius of Center. */
+	void OrderWander(const FVector& Center, float Radius);
+	/** Wildlife: stay close behind InLeader (falls back to wandering where it stood if the leader is gone). */
+	void OrderFollow(ATSCUnit* InLeader);
+	bool IsWildlife() const { return Role >= ETSCRole::Deer; }
 	void Teleport(const FVector& Pos);
 	FVector Loc2D() const { FVector L = GetActorLocation(); L.Z = 0.f; return L; }
 	bool AtHoldPos() const;
@@ -75,6 +84,8 @@ public:
 	ETSCJob Job = ETSCJob::Idle;
 	ETSCNeed Need = ETSCNeed::None;
 	ETSCOrder Order = ETSCOrder::Hold;
+	/** Wildlife: which side of the palisade the animal must stay on (checked on every step). */
+	ETSCZone Zone = ETSCZone::Free;
 	FString DisplayName;
 	bool bNamed = false;
 
@@ -110,6 +121,10 @@ private:
 	int32 TimberPathVersion = -1;
 	/** Humans: a skinned Viking (random man / woman, Torvald is the lord). Returns false if the assets are missing (then primitives are used). */
 	bool BuildViking(const FLinearColor& Tunic);
+	/** Wildlife: the skinned animal from Content/Animals/<Name>. False if missing (then nothing is shown). */
+	bool BuildAnimal();
+	/** Wildlife movement (Wander / Follow orders). Returns true while moving. */
+	bool SimWildlife(float Dt);
 	/** Weapon mesh on its hand socket (or the hand bone if the socket is missing), oriented, sized and gripped per Def.
 	 *  bArmedOnly: shown only while armed; otherwise it is the always-held item (bow, staff). */
 	UStaticMeshComponent* AddWeapon(const struct FTSCWeaponDef& Def, bool bArmedOnly);
@@ -135,6 +150,29 @@ private:
 	TObjectPtr<ATSCGameMode> GM;
 
 	TWeakObjectPtr<ATSCUnit> Target;
+	/** Follow order: the unit to trail (the husky follows Hakon). */
+	TWeakObjectPtr<ATSCUnit> Leader;
+	/** Wander order: roaming radius around HoldPos, current goal and the pause before moving on. */
+	float WanderRadius = 0.f;
+	FVector WanderGoal = FVector::ZeroVector;
+	float WanderPause = 0.f;
+	/** Wildlife moving fast (gallop) rather than walking. */
+	bool bGallop = false;
+	/** Set by StepToward when the next step would cross the palisade against Zone (the animal stays put and picks a new goal). */
+	bool bZoneBlocked = false;
+	/** Village dog playing with the jarl: seconds left, pause before it may do so again, and its angle on the circle around him. */
+	float PlayTimer = 0.f;
+	float PlayCooldown = 0.f;
+	float PlayAngle = 0.f;
+	/** True if P is on the side of the palisade this animal is allowed on. */
+	bool ZoneAllows(const FVector& P) const;
+	/** A random wander goal around HoldPos that Zone allows (falls back to the current spot). */
+	FVector PickWanderGoal() const;
+	/** Prey (deer, stag, fox): seconds left running from FleeFrom (the last wolf seen within range). */
+	float FleeTimer = 0.f;
+	FVector FleeFrom = FVector::ZeroVector;
+	/** Walking speed from Init (fleeing and following change Speed temporarily). */
+	float BaseSpeed = 190.f;
 	FVector WorkA = FVector::ZeroVector;
 	FVector WorkB = FVector::ZeroVector;
 	FVector HoldPos = FVector::ZeroVector;
@@ -176,6 +214,7 @@ private:
 	int32 TunicSlot = -1;
 	/** While > 0 a one-shot clip (attack, hit, work) plays and locomotion does not override it. */
 	float OneShotTimer = 0.f;
+	float DiagT = 0.f; // TEMP DIAG (remove)
 
 	/** Sword / axe / shield: visible only while armed. */
 	UPROPERTY()

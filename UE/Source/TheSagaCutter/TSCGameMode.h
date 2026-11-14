@@ -10,6 +10,7 @@
 
 class ATSCPrimActor;
 class ATSCOcean;
+class ATSCTerrain;
 class UAudioComponent;
 class USoundBase;
 class UDirectionalLightComponent;
@@ -177,6 +178,8 @@ public:
 
 	UPROPERTY()
 	TArray<TObjectPtr<ATSCUnit>> Units;
+	/** Animals (separate from Units): prey looks here for wolves. */
+	const TArray<TObjectPtr<ATSCUnit>>& GetWildlife() const { return Wildlife; }
 
 	TArray<FTSCPlot> Plots;
 
@@ -218,13 +221,19 @@ public:
 	void TestTimber();
 	int32 GridVersion = 0;
 	bool CanReach(const ATSCUnit* A, const ATSCUnit* B) const;
+	/** True if the world position is inside the palisade (the shore side in the east counts as inside up to the wall's end). */
+	bool IsInsideSettlement(const FVector& P) const;
+	/** Torvald, the lord of the settlement. */
+	const ATSCUnit* GetJarl() const { return Shield; }
 	void GetAssaultGoal(const ATSCUnit* U, FVector& OutPos, ETSCStructure& OutStruct) const;
 	void DamageStructure(ETSCStructure S, float Amount);
 	void AddTracer(const FVector& From, const FVector& To, const FLinearColor& Col);
 	void OnUnitDied(ATSCUnit* U);
 	void Toast(const FString& Text);
 	/** Visual only: how deep a unit standing at P is in the shallows (0 on land and on standing dock planks). */
+	float GroundReliefAt(const FVector& P) const;
 	float WadeDepthAt(const FVector& P) const;
+
 	/** A footstep in the shallows at P moving along Dir. */
 	void WadeStep(const FVector& P, const FVector& Dir);
 
@@ -253,6 +262,10 @@ private:
 	void BuildWorld();
 	ATSCPrimActor* SpawnPrim(const FVector& Loc, int32 Region = 0);
 	ATSCUnit* SpawnUnit(ETSCRole InRole, const FString& Name, const FVector& Loc);
+	/** An animal roaming around Loc (Region: it turns Ashen with that part of the world). */
+	ATSCUnit* SpawnWildlife(ETSCRole InRole, const FVector& Loc, float Radius, int32 Region);
+	/** Deer and wolves in the forest, foxes on its edges, the stag by the stag stone, Hakon's husky. */
+	void SpawnAllWildlife();
 	FVector CellCenter(int32 Cx, int32 Cy) const;
 	FVector CellCorner(int32 Cx, int32 Cy) const;
 	FVector CellF(float Cx, float Cy) const;
@@ -263,7 +276,6 @@ private:
 	FIntPoint WorldToCell(const FVector& P) const;
 	FIntPoint NearestFree(FIntPoint C) const;
 	bool LineFree(const FVector& A, const FVector& B) const;
-	int32 RegionOfCell(int32 Cx, int32 Cy) const;
 
 	// flow
 	void SimDay(float Dt);
@@ -308,13 +320,17 @@ private:
 	void SetCameraView(const FVector& Loc, float Arm);
 
 	UPROPERTY() TObjectPtr<ATSCPrimActor> Longship;
+	/** Pivot at the foot of the longship's sail: Z scale 1 = hoisted, ~0 = lowered onto the deck. */
+	UPROPERTY() TObjectPtr<USceneComponent> LongshipSail;
+	void SetSailHoisted(float Alpha);
 	FVector ShipMooring = FVector::ZeroVector;
-	UPROPERTY() TObjectPtr<ATSCPrimActor> GroundBase;
-	int32 MeadowPart = -1;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> WallSegs;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProBuildings;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProDressing;
 	UPROPERTY() TArray<TObjectPtr<AActor>> ProLevelProps;
+	/** The fence outside the wall (along the road from the gate), nearest to the gate first, with its level scale. Built at the end of the prologue. */
+	UPROPERTY() TArray<TObjectPtr<AActor>> ProRoadFence;
+	TArray<FVector> ProRoadFenceScale;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProTrees;
 	TArray<float> ProTreeFell;      // time each tree starts to fall
 	TArray<float> ProTreeYaw;       // direction it falls in
@@ -344,6 +360,7 @@ private:
 	TArray<int32> CrateParts;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> RaiderBoat;
 	UPROPERTY() TObjectPtr<ATSCOcean> Ocean;
+	UPROPERTY() TObjectPtr<ATSCTerrain> Terrain;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> Flotsam;
 	bool bProLandingPlayed = false;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> HammerStone;
@@ -357,6 +374,12 @@ private:
 	UPROPERTY() TObjectPtr<ATSCUnit> Boar;
 	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> EventUnits;
 	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> Workers;
+	/** Animals from Content/Animals: kept out of Units (no fights, no night clean-up), simulated alongside them. */
+	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> Wildlife;
+	/** Cows, the bull and the village dog: not there until the village is built (prologue). */
+	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> FarmAnimals;
+	/** Hakon's husky: appears with him when he lands (prologue). */
+	UPROPERTY() TObjectPtr<ATSCUnit> HunterDog;
 
 	// atmosphere
 	UPROPERTY() TObjectPtr<AActor> AtmoActor;
