@@ -164,6 +164,8 @@ public:
 
 	UPROPERTY()
 	TArray<TObjectPtr<ATSCUnit>> Units;
+	/** Animals (separate from Units): prey looks here for wolves. */
+	const TArray<TObjectPtr<ATSCUnit>>& GetWildlife() const { return Wildlife; }
 
 	TArray<FTSCPlot> Plots;
 
@@ -198,6 +200,10 @@ public:
 	bool FindPath(const FVector& From, const FVector& To, TArray<FVector>& Out) const;
 	int32 GridVersion = 0;
 	bool CanReach(const ATSCUnit* A, const ATSCUnit* B) const;
+	/** True if the world position is inside the palisade (the shore side in the east counts as inside up to the wall's end). */
+	bool IsInsideSettlement(const FVector& P) const;
+	/** Torvald, the lord of the settlement. */
+	const ATSCUnit* GetJarl() const { return Shield; }
 	void GetAssaultGoal(const ATSCUnit* U, FVector& OutPos, ETSCStructure& OutStruct) const;
 	void DamageStructure(ETSCStructure S, float Amount);
 	void AddTracer(const FVector& From, const FVector& To, const FLinearColor& Col);
@@ -233,6 +239,10 @@ private:
 	void BuildWorld();
 	ATSCPrimActor* SpawnPrim(const FVector& Loc, int32 Region = 0);
 	ATSCUnit* SpawnUnit(ETSCRole InRole, const FString& Name, const FVector& Loc);
+	/** An animal roaming around Loc (Region: it turns Ashen with that part of the world). */
+	ATSCUnit* SpawnWildlife(ETSCRole InRole, const FVector& Loc, float Radius, int32 Region);
+	/** Deer and wolves in the forest, foxes on its edges, the stag by the stag stone, Hakon's husky. */
+	void SpawnAllWildlife();
 	FVector CellCenter(int32 Cx, int32 Cy) const;
 	FVector CellCorner(int32 Cx, int32 Cy) const;
 	FVector CellF(float Cx, float Cy) const;
@@ -335,6 +345,8 @@ private:
 	UPROPERTY() TObjectPtr<ATSCUnit> Boar;
 	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> EventUnits;
 	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> Workers;
+	/** Animals from Content/Animals: kept out of Units (no fights, no night clean-up), simulated alongside them. */
+	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> Wildlife;
 
 	// atmosphere
 	UPROPERTY() TObjectPtr<AActor> AtmoActor;

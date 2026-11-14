@@ -304,6 +304,12 @@ bool ATSCGameMode::CanReach(const ATSCUnit* A, const ATSCUnit* B) const
 	return (!bGateClosed || bGateBroken) && !IsBlocked(TreeX, TreeY + 1);
 }
 
+bool ATSCGameMode::IsInsideSettlement(const FVector& P) const
+{
+	const float Cx = P.X / CELL + GW / 2, Cy = P.Y / CELL + GH / 2;
+	return Cx < WallEndX && WallShape(Cx, Cy) < 1.f;
+}
+
 // =====================================================================================================================
 // World
 // =====================================================================================================================
@@ -332,6 +338,55 @@ static TWeakObjectPtr<USkyLightComponent> GTSCSkyLight; // owned by the atmosphe
 static FQuat GTSCDaySun = FRotator(-42.f, -22.f, 0.f).Quaternion(); // where the sun stands on its daily arc (eased)
 static float GTSCSkyDrift = 0.f, GTSCShadowDrift = 0.f; // extra cloud travel earned while the game is fast-forwarded
 static void TSCUpdateSky(UDirectionalLightComponent* Sun, float AshAmount, float K, bool bNight, float DayF, float Thick, float Dt, float SpeedMul);
+ATSCUnit* ATSCGameMode::SpawnWildlife(ETSCRole InRole, const FVector& Loc, float Radius, int32 Region)
+{
+	ATSCUnit* U = GetWorld()->SpawnActor<ATSCUnit>(ATSCUnit::StaticClass(), FVector(Loc.X, Loc.Y, 0.f), FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f));
+	U->Init(this, InRole, FString());
+	U->Region = Region;
+	// Forest animals stay outside the palisade, livestock inside it; the stag and the grove fox live where they were put.
+	switch (InRole)
+	{
+	case ETSCRole::Deer: case ETSCRole::Wolf: U->Zone = ETSCZone::Outside; break;
+	case ETSCRole::Cow: case ETSCRole::Bull: U->Zone = ETSCZone::Inside; break;
+	case ETSCRole::Husky: if (Radius > 0.f && IsInsideSettlement(Loc)) { U->Zone = ETSCZone::Inside; } break; // the village dog
+
+	case ETSCRole::Stag: case ETSCRole::Fox: U->Zone = IsInsideSettlement(Loc) ? ETSCZone::Inside : ETSCZone::Outside; break;
+	default: break;
+	}
+	U->OrderWander(Loc, Radius);
+	Wildlife.Add(U);
+	Prims.Add(U); // takes part in the Living / Ashen transition of its region
+	return U;
+}
+
+void ATSCGameMode::SpawnAllWildlife()
+{
+	// The sacred stag keeps to the grove by the stag stone.
+	SpawnWildlife(ETSCRole::Stag, CellF(16.2f, 22.6f), 260.f, TSCRegion::Grove);
+	// Deer graze in clearings of the western forest (north and south of the road).
+	SpawnWildlife(ETSCRole::Deer, CellF(3.f, 6.f), 350.f, TSCRegion::Forest);
+	SpawnWildlife(ETSCRole::Deer, CellF(3.6f, 6.8f), 350.f, TSCRegion::Forest);
+	SpawnWildlife(ETSCRole::Deer, CellF(2.6f, 17.5f), 350.f, TSCRegion::Forest);
+	// A wolf pack prowls the deep forest, far from the wall.
+	SpawnWildlife(ETSCRole::Wolf, CellF(-2.f, 4.5f), 420.f, TSCRegion::Forest);
+	SpawnWildlife(ETSCRole::Wolf, CellF(-2.6f, 5.2f), 420.f, TSCRegion::Forest);
+	SpawnWildlife(ETSCRole::Wolf, CellF(-1.4f, 5.6f), 420.f, TSCRegion::Forest);
+	// Foxes sneak along the forest edges: north of the clearing and behind the grove.
+	SpawnWildlife(ETSCRole::Fox, CellF(6.4f, 2.2f), 300.f, TSCRegion::Forest);
+	SpawnWildlife(ETSCRole::Fox, CellF(10.8f, 25.6f), 300.f, TSCRegion::Grove);
+	// Village livestock grazes in the pasture inside the palisade, south of the gate (two cows and a bull); it never leaves the wall.
+	SpawnWildlife(ETSCRole::Cow, CellF(10.6f, 15.4f), 220.f, TSCRegion::None);
+	SpawnWildlife(ETSCRole::Cow, CellF(11.8f, 17.2f), 220.f, TSCRegion::None);
+	SpawnWildlife(ETSCRole::Bull, CellF(10.0f, 17.8f), 220.f, TSCRegion::None);
+	// The village dog runs about inside the palisade, between the hall and the pasture, and plays with the jarl.
+	SpawnWildlife(ETSCRole::Husky, CellF(13.0f, 14.6f), 450.f, TSCRegion::None);
+	// Hakon's husky trots after its master.
+	if (Hunter)
+	{
+		ATSCUnit* Dog = SpawnWildlife(ETSCRole::Husky, Hunter->GetActorLocation() + FVector(-110.f, 60.f, 0.f), 0.f, TSCRegion::None);
+		Dog->OrderFollow(Hunter);
+	}
+}
 
 void ATSCGameMode::BuildAtmosphere()
 {
@@ -733,6 +788,7 @@ void ATSCGameMode::BuildWorld()
 	NumFood = 4;
 	NumHomeUnits = Units.Num();
 	for (ATSCUnit* U : Units) { UnitHome.Add(U->GetActorLocation()); }
+	SpawnAllWildlife();
 	ResetVillagers();
 }
 
@@ -1127,6 +1183,7 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 			if (Phase == ETSCPhase::Day) { SimDay(Dt); }
 			else if (Phase == ETSCPhase::Night) { SimNight(Dt); }
 			for (int32 I = 0; I < Units.Num(); ++I) { if (Units[I]) { Units[I]->Sim(Dt); } }
+			for (ATSCUnit* A : Wildlife) { if (A) { A->Sim(Dt); } }
 		}
 	}
 	{
