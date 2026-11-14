@@ -77,6 +77,20 @@ struct FTSCPlot
 	TObjectPtr<ATSCPrimActor> Building;
 };
 
+/** Runtime timber state. Scripted/prologue trees are deliberately not registered here. */
+struct FTSCTimberTree
+{
+	TWeakObjectPtr<ATSCPrimActor> Tree;
+	TWeakObjectPtr<ATSCUnit> Owner;
+	FIntPoint Cell;
+	FVector Base = FVector::ZeroVector;
+	FVector WorkSpot = FVector::ZeroVector;
+	FVector FallDir = FVector::ForwardVector;
+	FQuat Rotation = FQuat::Identity;
+	int32 Stage = 0; // standing, fallen, exhausted; persists across a worker cancellation
+	float FallTime = 0.f;
+};
+
 /**
  * The whole game: builds the clearing out of primitives, runs the three days and the final night, the two-resource
  * economy, the scripted scenes with the CUT! mechanic, and assembles the skald's epilogue.
@@ -195,6 +209,13 @@ public:
 
 	// ----- services for units -----------------------------------------------------------------------------------------
 	bool FindPath(const FVector& From, const FVector& To, TArray<FVector>& Out) const;
+	ATSCPrimActor* ReserveTimber(ATSCUnit* Worker, FVector& OutSpot);
+	bool ValidateTimber(ATSCUnit* Worker, ATSCPrimActor* Tree, FVector& OutSpot) const;
+	/** Returns 1 after felling, 2 after removing, 0 for an invalid claim. No resource award here. */
+	int32 CompleteTimberStage(ATSCUnit* Worker, ATSCPrimActor* Tree);
+	void ReleaseTimber(ATSCUnit* Worker);
+	void SimTimber(float Dt);
+	void TestTimber();
 	int32 GridVersion = 0;
 	bool CanReach(const ATSCUnit* A, const ATSCUnit* B) const;
 	void GetAssaultGoal(const ATSCUnit* U, FVector& OutPos, ETSCStructure& OutStruct) const;
@@ -225,6 +246,8 @@ public:
 	static constexpr int32 GH = 24;
 
 private:
+	TArray<FTSCTimberTree> TimberTrees;
+
 	// world
 	void BuildAtmosphere();
 	void BuildWorld();

@@ -497,6 +497,7 @@ void ATSCUnit::SetArmed(bool bInArmed)
 
 void ATSCUnit::SetJob(ETSCJob InJob)
 {
+	if (Job != InJob) { CancelTimber(); }
 	Job = InJob;
 	if (Role == ETSCRole::Worker && TunicPart >= 0)
 	{
@@ -516,6 +517,9 @@ void ATSCUnit::SetJob(ETSCJob InJob)
 
 void ATSCUnit::OrderWork(const FVector& A, const FVector& B)
 {
+	// UpdateJobs repeats the same order when an unrelated job/build changes. Keep the current tree/cargo.
+	if (Order == ETSCOrder::Work && WorkA.Equals(A) && WorkB.Equals(B)) { return; }
+	CancelTimber();
 	Order = ETSCOrder::Work;
 	WorkA = A;
 	WorkB = B;
@@ -525,6 +529,7 @@ void ATSCUnit::OrderWork(const FVector& A, const FVector& B)
 
 void ATSCUnit::OrderHold(const FVector& Pos)
 {
+	CancelTimber();
 	Order = ETSCOrder::Hold;
 	HoldPos = Pos;
 	if (bSheltered)
@@ -536,12 +541,14 @@ void ATSCUnit::OrderHold(const FVector& Pos)
 
 void ATSCUnit::OrderShelter(const FVector& Pos)
 {
+	CancelTimber();
 	Order = ETSCOrder::Shelter;
 	HoldPos = Pos;
 }
 
 void ATSCUnit::OrderLeave(const FVector& Pos)
 {
+	CancelTimber();
 	Order = ETSCOrder::Leave;
 	HoldPos = Pos;
 	Target = nullptr;
@@ -549,11 +556,13 @@ void ATSCUnit::OrderLeave(const FVector& Pos)
 
 void ATSCUnit::OrderAssault()
 {
+	CancelTimber();
 	Order = ETSCOrder::Assault;
 }
 
 void ATSCUnit::Teleport(const FVector& Pos)
 {
+	CancelTimber();
 	SetActorLocation(FVector(Pos.X, Pos.Y, GM ? -GM->WadeDepthAt(FVector(Pos.X, Pos.Y, 0.f)) : 0.f));
 	LastWadePos = GetActorLocation();
 	Path.Reset();
@@ -614,6 +623,7 @@ void ATSCUnit::Hurt(float Amount)
 void ATSCUnit::Kill()
 {
 	if (bDead) { return; }
+	CancelTimber();
 	HP = 0.f;
 	bDead = true;
 	DeathTimer = 0.f;
@@ -686,6 +696,7 @@ bool ATSCUnit::StepToward(const FVector& Dest, float Dt, float StopDist)
 
 void ATSCUnit::Sim(float Dt)
 {
+	if (!IsTimberWorker()) { CancelTimber(); }
 	UpdateWading(Dt);
 	UpdateArrows(Dt); // arrows already in the air keep flying even if the hunter falls
 	if (bGone) { return; }
@@ -749,6 +760,7 @@ void ATSCUnit::Sim(float Dt)
 		}
 		if (T)
 		{
+			CancelTimber();
 			BarTimer = 6.f;
 			const FVector TL = T->Loc2D();
 			const float D = FVector::Dist2D(GetActorLocation(), TL);
@@ -787,6 +799,11 @@ void ATSCUnit::Sim(float Dt)
 	{
 	case ETSCOrder::Work:
 	{
+		if (IsTimberWorker())
+		{
+			bMoving = SimTimberWork(Dt);
+			break;
+		}
 		const FVector& Dest = WorkPhase == 0 ? WorkA : WorkB;
 		if (WorkTimer > 0.f)
 		{
@@ -905,4 +922,91 @@ void ATSCUnit::Animate(float Dt, bool bMoving)
 		}
 		Arm->SetRelativeRotation(FRotator(Pitch, 0.f, 0.f));
 	}
+}
+
+// A work cycle has two completed stages on the same reserved actor. Walking/carrying never completes a stage.
+bool ATSCUnit::IsTimberWorker() const
+{
+	return IsValid(GM) && GM->Phase == ETSCPhase::Day && IsAlive() && !bDowned && !bSheltered
+		&& Order == ETSCOrder::Work && !WorkA.Equals(WorkB)
+		&& (Role == ETSCRole::Woodcutter || (Role == ETSCRole::Worker && Job == ETSCJob::Wood));
+}
+
+void ATSCUnit::CancelTimber()
+{
+	if (IsValid(GM)) { GM->ReleaseTimber(this); }
+	if (TimberTarget.IsValid() || TimberStageDuration > 0.f)
+	{
+		WorkTimer = 0.f;
+		WorkPhase = 0;
+	}
+	TimberTarget.Reset();
+	TimberStageDuration = 0.f;
+	TimberPathVersion = -1;
+}
+
+void ATSCUnit::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	CancelTimber();
+	Super::EndPlay(EndPlayReason);
+}
+
+bool ATSCUnit::SimTimberWork(float Dt)
+{
+	if (WorkPhase == 1) // keep the existing return-to-store/carry animation; economy is still rate based
+	{
+		if (!StepToward(WorkB, Dt, 40.f)) { return true; }
+		if (WorkTimer <= 0.f) { WorkTimer = FMath::FRandRange(1.f, 2.5f); }
+		WorkTimer -= Dt;
+		if (WorkTimer <= 0.f) { WorkPhase = 0; }
+		return false;
+	}
+	FVector Spot;
+	ATSCPrimActor* Tree = TimberTarget.Get();
+	if (Tree && !GM->ValidateTimber(this, Tree, Spot))
+	{
+		CancelTimber();
+		Tree = nullptr;
+	}
+	if (!Tree)
+	{
+		TimberRetry -= Dt;
+		if (TimberRetry > 0.f) { return false; }
+		Tree = GM->ReserveTimber(this, Spot);
+		TimberTarget = Tree;
+		if (!Tree) { TimberRetry = 1.f; return false; }
+		TimberStageDuration = FMath::FRandRange(4.f, 7.f) * 0.5f;
+		WorkTimer = 0.f;
+		TimberPathVersion = -1;
+	}
+	if (TimberPathVersion != GM->GridVersion)
+	{
+		TArray<FVector> CheckPath;
+		if (!GM->FindPath(Loc2D(), Spot, CheckPath) || CheckPath.IsEmpty()
+			|| FVector::Dist2D(CheckPath.Last(), Spot) > 5.f)
+		{
+			CancelTimber();
+			TimberRetry = 0.3f;
+			return false;
+		}
+		TimberPathVersion = GM->GridVersion;
+		PathVersion = -1;
+	}
+	if (!StepToward(Spot, Dt, 30.f)) { return true; }
+	const FRotator Face = (Tree->GetActorLocation() - Loc2D()).Rotation();
+	SetActorRotation(FMath::RInterpTo(GetActorRotation(), FRotator(0.f, Face.Yaw, 0.f), Dt, 12.f));
+	if (WorkTimer <= 0.f) { WorkTimer = TimberStageDuration; }
+	if (SwingTimer <= 0.f && OneShotTimer <= 0.f) { StartSwing(0.6f, 0.f, ETSCAnim::Slash); }
+	WorkTimer -= Dt;
+	if (WorkTimer <= 0.f)
+	{
+		const int32 Stage = GM->CompleteTimberStage(this, Tree);
+		if (Stage != 1)
+		{
+			TimberTarget.Reset();
+			TimberStageDuration = 0.f;
+			WorkPhase = Stage == 2 ? 1 : 0;
+		}
+	}
+	return false;
 }

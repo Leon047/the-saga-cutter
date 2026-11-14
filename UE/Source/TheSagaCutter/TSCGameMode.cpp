@@ -519,6 +519,14 @@ void ATSCGameMode::BuildWorld()
 			BuildTree(T, X * 57 + Y * 13, true);
 			T->Refresh();
 			SetBlocked(X, Y, true);
+			if ((bForest || bGroveTree) && InGrid(X, Y))
+			{
+				FTSCTimberTree& Tree = TimberTrees.AddDefaulted_GetRef();
+				Tree.Tree = T;
+				Tree.Cell = FIntPoint(X, Y);
+				Tree.Base = T->GetActorLocation();
+				Tree.Rotation = T->GetActorQuat();
+			}
 		}
 	}
 	// glowing mushrooms in the stag grove (foraged for food)
@@ -1121,6 +1129,7 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 		{
 			if (Phase == ETSCPhase::Day) { SimDay(Dt); }
 			else if (Phase == ETSCPhase::Night) { SimNight(Dt); }
+			SimTimber(Dt);
 			for (int32 I = 0; I < Units.Num(); ++I) { if (Units[I]) { Units[I]->Sim(Dt); } }
 		}
 	}
@@ -2441,6 +2450,9 @@ void ATSCGameMode::BuildEpilogue(bool bHallFell)
 
 void ATSCGameMode::TSCAuto(const FString& Takes, const FString& Build, float Speed)
 {
+#if !UE_BUILD_SHIPPING
+	if (Takes.Equals(TEXT("TIMBERTEST"), ESearchCase::IgnoreCase)) { TestTimber(); return; }
+#endif
 	bAuto = true;
 	AutoTakes = Takes.ToUpper();
 	AutoBuild = Build.ToUpper();
@@ -2487,4 +2499,206 @@ void ATSCGameMode::AutoPlay(float Dt)
 		const EBuilding T = C == TEXT('H') ? EBuilding::House : C == TEXT('M') ? EBuilding::Sawmill : C == TEXT('E') ? EBuilding::Healer : C == TEXT('S') ? EBuilding::HammerShrine : EBuilding::StagShrine;
 		if (CanBuild(T)) { StartBuild(T); AutoBuild.RightChopInline(1); }
 	}
+}
+
+// Timber claims are acquired and completed on the game thread, before another unit can select the actor.
+ATSCPrimActor* ATSCGameMode::ReserveTimber(ATSCUnit* Worker, FVector& OutSpot)
+{
+	check(IsInGameThread());
+	if (!IsValid(Worker) || !Worker->IsTimberWorker()) { return nullptr; }
+	FTSCTimberTree* Best = nullptr;
+	float BestCost = MAX_flt;
+	for (FTSCTimberTree& T : TimberTrees)
+	{
+		ATSCPrimActor* Tree = T.Tree.Get();
+		if (!Tree || Tree->IsHidden() || T.Stage >= 2) { continue; }
+		ATSCUnit* Claimant = T.Owner.Get();
+		if (Claimant && !Claimant->IsTimberWorker()) { T.Owner.Reset(); Claimant = nullptr; }
+		if (Claimant == Worker) { OutSpot = T.WorkSpot; return Tree; }
+		if (Claimant) { continue; }
+		// An exact free neighbour is required: FindPath otherwise snaps a blocked goal to another cell.
+		for (int32 DX = -1; DX <= 1; ++DX)
+		{
+			for (int32 DY = -1; DY <= 1; ++DY)
+			{
+				if ((DX == 0 && DY == 0) || IsBlocked(T.Cell.X + DX, T.Cell.Y + DY)) { continue; }
+				const FVector Spot = T.Base + FVector(DX * CELL * 0.65f, DY * CELL * 0.65f, 0.f);
+				const FIntPoint C = WorldToCell(Spot);
+				if (IsBlocked(C.X, C.Y)) { continue; }
+				TArray<FVector> Route;
+				if (!FindPath(Worker->Loc2D(), Spot, Route) || Route.IsEmpty() || FVector::Dist2D(Route.Last(), Spot) > 5.f) { continue; }
+				float Cost = 0.f;
+				FVector Prev = Worker->Loc2D();
+				for (const FVector& P : Route) { Cost += FVector::Dist2D(Prev, P); Prev = P; }
+				if (Cost < BestCost) { BestCost = Cost; Best = &T; OutSpot = Spot; }
+			}
+		}
+	}
+	if (!Best) { return nullptr; }
+	Best->Owner = Worker;
+	Best->WorkSpot = OutSpot;
+	return Best->Tree.Get();
+}
+
+bool ATSCGameMode::ValidateTimber(ATSCUnit* Worker, ATSCPrimActor* Tree, FVector& OutSpot) const
+{
+	if (!IsValid(Worker) || !Worker->IsTimberWorker() || !IsValid(Tree) || Tree->IsHidden()) { return false; }
+	for (const FTSCTimberTree& T : TimberTrees)
+	{
+		if (T.Tree.Get() != Tree) { continue; }
+		const FIntPoint C = WorldToCell(T.WorkSpot);
+		if (T.Owner.Get() != Worker || T.Stage >= 2 || IsBlocked(C.X, C.Y)) { return false; }
+		OutSpot = T.WorkSpot;
+		return true;
+	}
+	return false;
+}
+
+void ATSCGameMode::ReleaseTimber(ATSCUnit* Worker)
+{
+	for (FTSCTimberTree& T : TimberTrees) { if (T.Owner.Get() == Worker) { T.Owner.Reset(); } }
+}
+
+int32 ATSCGameMode::CompleteTimberStage(ATSCUnit* Worker, ATSCPrimActor* Tree)
+{
+	FVector Spot;
+	if (!ValidateTimber(Worker, Tree, Spot) || FVector::Dist2D(Worker->Loc2D(), Spot) > 40.f) { ReleaseTimber(Worker); return 0; }
+	for (FTSCTimberTree& T : TimberTrees)
+	{
+		if (T.Tree.Get() != Tree) { continue; }
+		++T.Stage;
+		if (T.Stage == 1)
+		{
+			T.FallDir = (T.Base - Worker->Loc2D()).GetSafeNormal2D();
+			T.FallTime = 0.f;
+			SetBlocked(T.Cell.X, T.Cell.Y, false);
+		}
+		else
+		{
+			Tree->SetActorHiddenInGame(true);
+			Tree->SetActorEnableCollision(false);
+			T.Owner.Reset();
+		}
+		return T.Stage;
+	}
+	return 0;
+}
+
+void ATSCGameMode::SimTimber(float Dt)
+{
+	for (FTSCTimberTree& T : TimberTrees)
+	{
+		ATSCPrimActor* Tree = T.Tree.Get();
+		if (!Tree || Tree->IsHidden())
+		{
+			if (T.Stage < 2) { SetBlocked(T.Cell.X, T.Cell.Y, false); T.Stage = 2; }
+			T.Owner.Reset();
+			continue;
+		}
+		if (T.Owner.IsValid() && !T.Owner->IsTimberWorker()) { T.Owner.Reset(); }
+		if (T.Stage != 1) { continue; }
+		T.FallTime = FMath::Min(1.3f, T.FallTime + Dt);
+		const float A = T.FallTime / 1.3f;
+		const float Ang = A * A * HALF_PI * 0.985f;
+		const FVector Up = T.FallDir * FMath::Sin(Ang) + FVector::UpVector * FMath::Cos(Ang);
+		Tree->SetActorRotation(FQuat::FindBetweenNormals(FVector::UpVector, Up) * T.Rotation);
+	}
+}
+
+void ATSCGameMode::TestTimber()
+{
+#if !UE_BUILD_SHIPPING
+	// Run only in a disposable PIE/game world; these checks use actual generated trees and units.
+	if (Phase == ETSCPhase::Title) { StartGame(); }
+	Phase = ETSCPhase::Day;
+	int32 Passed = 0, Failed = 0;
+	auto Check = [&](bool bOK, const TCHAR* Name)
+	{
+		if (bOK) { ++Passed; } else { ++Failed; }
+		UE_LOG(LogSaga, Display, TEXT("[TimberTest] %s %s"), bOK ? TEXT("PASS") : TEXT("FAIL"), Name);
+	};
+	ATSCUnit* A = SpawnUnit(ETSCRole::Worker, TEXT("TimberTestA"), CellF(12.f, 7.f));
+	ATSCUnit* B = SpawnUnit(ETSCRole::Worker, TEXT("TimberTestB"), CellF(12.f, 7.f));
+	for (ATSCUnit* U : { A, B }) { U->SetJob(ETSCJob::Wood); U->OrderWork(CellF(7.f, 9.f), CellF(12.f, 7.f)); }
+	FVector PA, PB;
+	ATSCPrimActor* TA = ReserveTimber(A, PA);
+	ATSCPrimActor* TB = ReserveTimber(B, PB);
+	Check(TA && TB && TA != TB, TEXT("competing workers reserve distinct reachable trees"));
+	if (!TA || !TB) { A->Destroy(); B->Destroy(); return; }
+	Check(ReserveTimber(A, PA) == TA, TEXT("acquire is idempotent"));
+	Check(CompleteTimberStage(B, TA) == 0, TEXT("another worker cannot complete a claimed tree"));
+	A->Teleport(PA); // teleport cancels reservations, then the real Sim selects again
+	A->Sim(0.1f);
+	TA = A->TimberTarget.Get();
+	Check(TA != nullptr, TEXT("real worker selects a target"));
+	const float WoodBefore = Wood;
+	int32 Guard = 0;
+	while (TA && !TA->IsHidden() && Guard++ < 500)
+	{
+		A->Sim(0.1f); SimTimber(0.1f);
+		for (const FTSCTimberTree& T : TimberTrees)
+		{
+			if (T.Tree.Get() == TA && T.Stage == 1 && T.FallTime >= 1.3f)
+			{
+				Check(T.Owner.Get() == A && !TA->IsHidden() && FVector::DotProduct(TA->GetActorUpVector(), FVector::UpVector) < 0.1f,
+					TEXT("first completed stage falls and remains visible with the same owner"));
+				Guard = 0;
+				while (!TA->IsHidden() && Guard++ < 100) { A->Sim(0.1f); SimTimber(0.1f); }
+				break;
+			}
+		}
+	}
+	Check(TA && TA->IsHidden() && A->WorkPhase == 1 && !A->TimberTarget.IsValid(), TEXT("second stage removes tree and begins carry"));
+	Check(Wood == WoodBefore, TEXT("no duplicate award outside the rate economy"));
+	Guard = 0;
+	while (!A->TimberTarget.IsValid() && Guard++ < 800) { A->Sim(0.1f); SimTimber(0.1f); }
+	Check(A->TimberTarget.IsValid() && A->TimberTarget.Get() != TA, TEXT("delivery completes and worker selects next tree"));
+	ATSCPrimActor* Next = A->TimberTarget.Get();
+	A->SetJob(ETSCJob::Food);
+	FVector Dummy;
+	Check(!A->TimberTarget.IsValid() && !ValidateTimber(A, Next, Dummy), TEXT("job change releases claim"));
+	// Cancellation must make the actual owner slot reusable, not just clear the worker's pointer.
+	auto HasClaim = [&](ATSCUnit* U)
+	{
+		for (const FTSCTimberTree& T : TimberTrees) { if (T.Owner.Get() == U) { return true; } }
+		return false;
+	};
+	A->SetJob(ETSCJob::Wood);
+	A->OrderWork(CellF(7.f, 9.f), CellF(12.f, 7.f));
+	A->Sim(1.1f);
+	Check(HasClaim(A), TEXT("worker reacquires after job change"));
+	A->OrderHold(A->Loc2D());
+	Check(!HasClaim(A), TEXT("hold order frees owner slot"));
+	A->OrderWork(CellF(7.f, 9.f), CellF(12.f, 7.f));
+	A->Sim(1.1f);
+	Next = A->TimberTarget.Get();
+	if (ValidateTimber(A, Next, Dummy))
+	{
+		const FIntPoint C = WorldToCell(Dummy);
+		SetBlocked(C.X, C.Y, true);
+		A->Sim(0.1f);
+		bool bOldOwned = false;
+		for (const FTSCTimberTree& T : TimberTrees) { if (T.Tree.Get() == Next && T.Owner.Get() == A) { bOldOwned = true; } }
+		Check(!bOldOwned, TEXT("newly blocked work spot releases old target"));
+		SetBlocked(C.X, C.Y, false);
+	}
+	else { Check(false, TEXT("reachable target for blocking check")); }
+	A->CancelTimber();
+	A->Sim(1.1f);
+	Next = A->TimberTarget.Get();
+	if (Next) { Next->Destroy(); }
+	SimTimber(0.1f);
+	A->Sim(0.1f);
+	bool bDestroyedClaim = false;
+	for (const FTSCTimberTree& T : TimberTrees) { if (!T.Tree.IsValid() && T.Owner.IsValid()) { bDestroyedClaim = true; } }
+	Check(Next && !bDestroyedClaim, TEXT("destroyed target cannot leave a reservation"));
+	A->OrderShelter(A->Loc2D());
+	Check(!HasClaim(A), TEXT("shelter cancels timber work"));
+	B->Sim(0.1f);
+	TB = B->TimberTarget.Get();
+	B->Kill();
+	Check(!B->TimberTarget.IsValid() && !ValidateTimber(B, TB, Dummy), TEXT("death releases claim"));
+	A->Destroy(); B->Destroy();
+	UE_LOG(LogSaga, Display, TEXT("[TimberTest] RESULT passed=%d failed=%d"), Passed, Failed);
+#endif
 }

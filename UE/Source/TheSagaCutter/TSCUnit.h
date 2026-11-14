@@ -45,6 +45,9 @@ class ATSCUnit : public ATSCPrimActor
 public:
 	void Init(ATSCGameMode* InGM, ETSCRole InRole, const FString& InName);
 	void Sim(float Dt);
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	bool IsTimberWorker() const;
+	void CancelTimber();
 
 	bool IsAlive() const { return !bDead && !bGone; }
 	/** Alive and on the map (not sheltering indoors). */
@@ -98,7 +101,13 @@ public:
 	bool bDowned = false;
 
 private:
+	friend class ATSCGameMode; // the dev-only integration check drives the real work cycle
 	void BuildFigure();
+	bool SimTimberWork(float Dt);
+	TWeakObjectPtr<ATSCPrimActor> TimberTarget;
+	float TimberRetry = 0.f;
+	float TimberStageDuration = 0.f;
+	int32 TimberPathVersion = -1;
 	/** Humans: a skinned Viking (random man / woman, Torvald is the lord). Returns false if the assets are missing (then primitives are used). */
 	bool BuildViking(const FLinearColor& Tunic);
 	/** Weapon mesh on its hand socket (or the hand bone if the socket is missing), oriented, sized and gripped per Def.
