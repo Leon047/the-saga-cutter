@@ -21,6 +21,10 @@
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialParameterCollection.h"
+#include "ParticleEmitterInstances.h"
+#include "ParticleHelper.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "UObject/UObjectIterator.h"
 #include "SceneInterface.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
@@ -86,6 +90,30 @@ namespace
 		UKismetMaterialLibrary::SetScalarParameterValue(World, Wind, TEXT("WindPhase"), Phase);
 		UKismetMaterialLibrary::SetScalarParameterValue(World, Wind, TEXT("WindAmp"), FMath::Clamp(0.45f + 0.3f * SmoothSpeed, 0.3f, 2.f));
 		UKismetMaterialLibrary::SetVectorParameterValue(World, Wind, TEXT("WindDir"), FLinearColor(SmoothDir.X, SmoothDir.Y, 0.f, 0.f));
+
+		// Chimney smoke: the plume rises straight up and the current wind carries every live particle along, so the
+		// whole column bends together when the wind shifts. Gusts come from two slow sines on top of the level's wind.
+		static float GustTime = 0.f;
+		GustTime += Dt;
+		const float Gust = 1.f + 0.35f * FMath::Sin(GustTime * 0.37f) + 0.2f * FMath::Sin(GustTime * 1.13f + 1.7f);
+		const FVector Side(-SmoothDir.Y, SmoothDir.X, 0.f);
+		const FVector Drift = (SmoothDir * (75.f * SmoothSpeed * Gust) + Side * (28.f * SmoothSpeed * FMath::Sin(GustTime * 0.23f))) * Dt;
+		for (TObjectIterator<UParticleSystemComponent> It; It; ++It)
+		{
+			if (It->GetWorld() != World || !It->ComponentHasTag(TEXT("TSC_ChimneySmoke"))) { continue; }
+			It->SetWorldRotation(FRotator::ZeroRotator);
+			It->ForceAsyncWorkCompletion(UParticleSystemComponent::STALL);
+			for (FParticleEmitterInstance* Inst : It->EmitterInstances)
+			{
+				if (!Inst || !Inst->ParticleData || !Inst->ParticleIndices) { continue; }
+				for (int32 I = 0; I < Inst->ActiveParticles; ++I)
+				{
+					DECLARE_PARTICLE(Particle, Inst->ParticleData + Inst->ParticleStride * Inst->ParticleIndices[I]);
+					Particle.Location += Drift;
+					Particle.OldLocation += Drift;
+				}
+			}
+		}
 	}
 
 	// Prologue beats (seconds): landfall, clearing, raising, the forest wakes, hold and fade.
@@ -644,13 +672,7 @@ void ATSCGameMode::BuildWorld()
 		R->Refresh();
 		SetBlocked(Rocks[I].X, Rocks[I].Y, true);
 	}
-	for (const FVector2D& T : { FVector2D(13.5f, 13.5f), FVector2D(20.5f, 13.5f), FVector2D(25.6f, 10.6f), FVector2D(15.6f, 14.6f), FVector2D(13.4f, 8.6f) })
-	{
-		ATSCPrimActor* A = SpawnPrim(CellF(T.X, T.Y));
-		BuildTorch(A);
-		A->Refresh();
-		ProDressing.Add(A);
-	}
+	// Torch Blueprints are placed in Map_Saga and collected by CollectLevelProps.
 
 	// ----- construction plots -----
 	Plots.SetNum(2);

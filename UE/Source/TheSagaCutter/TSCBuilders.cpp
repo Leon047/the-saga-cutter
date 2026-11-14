@@ -4,6 +4,27 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Particles/ParticleSystem.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Particles/ParticleSpriteEmitter.h"
+#include "Particles/ParticleLODLevel.h"
+#include "Particles/ParticleModuleRequired.h"
+#include "Particles/Spawn/ParticleModuleSpawn.h"
+#include "Particles/Lifetime/ParticleModuleLifetime.h"
+#include "Particles/Size/ParticleModuleSize.h"
+#include "Particles/Size/ParticleModuleSizeMultiplyLife.h"
+#include "Particles/Velocity/ParticleModuleVelocity.h"
+#include "Particles/Velocity/ParticleModuleVelocityOverLifetime.h"
+#include "Particles/Location/ParticleModuleLocation.h"
+#include "Particles/Color/ParticleModuleColorOverLife.h"
+#include "Distributions/DistributionFloatConstant.h"
+#include "Distributions/DistributionFloatUniform.h"
+#include "Distributions/DistributionFloatConstantCurve.h"
+#include "Distributions/DistributionVectorConstant.h"
+#include "Distributions/DistributionVectorUniform.h"
+#include "Distributions/DistributionVectorConstantCurve.h"
+#include "Materials/MaterialInterface.h"
+
 #include "HAL/FileManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/FileHelper.h"
@@ -69,7 +90,20 @@ namespace TSC
 
 		void LoadKit()
 		{
-			if (GKitLoaded2) { return; }
+			// Re-read edited assembly tables before the next house is built (including PIE restarts).
+			static FDateTime LoadedDataStamp;
+			FDateTime DataStamp;
+			for (const TCHAR* Name : { TEXT("VikingHouseModules.tsv"), TEXT("VikingHouses.tsv"), TEXT("VikingHouseLayouts.tsv") })
+			{
+				const FDateTime Stamp = IFileManager::Get().GetTimeStamp(*(FPaths::ProjectContentDir() / TEXT("Vikings/Data") / Name));
+				if (Stamp > DataStamp) { DataStamp = Stamp; }
+			}
+			if (GKitLoaded2 && LoadedDataStamp == DataStamp) { return; }
+			LoadedDataStamp = DataStamp;
+			GKitHouses2.Empty();
+			GKitModulePaths2.Empty();
+			GKitWarned.Empty();
+			GKitOk2 = false;
 			GKitLoaded2 = true;
 			TArray<TArray<FString>> Modules, Houses, Layouts;
 			if (!ReadTsv(TEXT("VikingHouseModules.tsv"), Modules)) { KitWarn(TEXT("f1"), TEXT("VikingHouseModules.tsv is missing")); return; }
@@ -123,6 +157,7 @@ namespace TSC
 		 * tile-by-tile rise (build steps), Living/Ashen visibility and the Ashen tint per part. Returns false (building
 		 * nothing) when data or a mesh is missing.
 		 */
+
 		bool BuildKitHouse(ATSCPrimActor* A, const TCHAR* House, int32 W, int32 H)
 		{
 			LoadKit();
@@ -166,6 +201,45 @@ namespace TSC
 				// The group is a component tag ("VH_Shell" / "VH_Removable" / "VH_Interior") so a cutaway can find the parts.
 				Comp->ComponentTags.Add(FName(*(FString(TEXT("VH_")) + I.Group.ToString())));
 				++GroupCount.FindOrAdd(I.Group);
+				if (I.Module == TEXT("DECO_Chimney") || I.Module == TEXT("DECO_BigChimney"))
+				{
+					if (UParticleSystem* Template = LoadObject<UParticleSystem>(nullptr, TEXT("/Game/VFX/P_ChimneySmokePlume.P_ChimneySmokePlume")))
+					{
+						// The effect is a copy of a fire-smoke system whose velocity-over-life curve stalls the rise after a
+						// few metres. Switch that module off once, so the plume keeps climbing for its whole life.
+						static bool bPlumeFixed = false;
+						if (!bPlumeFixed)
+						{
+							bPlumeFixed = true;
+							for (UParticleEmitter* Em : Template->Emitters)
+							{
+								if (!Em) { continue; }
+								for (UParticleLODLevel* Lod : Em->LODLevels)
+								{
+									if (!Lod) { continue; }
+									for (UParticleModule* Mod : Lod->Modules)
+									{
+										if (Mod && Mod->IsA<UParticleModuleVelocityOverLifetime>()) { Mod->bEnabled = false; }
+									}
+								}
+							}
+						}
+						UParticleSystemComponent* Smoke = NewObject<UParticleSystemComponent>(A);
+						Smoke->bAutoActivate = false;
+						Smoke->SetTemplate(Template);
+						Smoke->SetupAttachment(Comp);
+						// Both chimney meshes have their flue centred on local X/Y = 0.
+						Smoke->SetRelativeLocation(FVector(0.f, 0.f, Meshes[N]->GetBoundingBox().Max.Z + 2.f));
+						Smoke->SetRelativeScale3D(FVector(1.f));
+						Smoke->ComponentTags.Add(TEXT("TSC_ChimneySmoke"));
+						Smoke->SetCastShadow(false);
+						Smoke->SetCullDistance(0.f); // never culled: the game camera sits about 165 m away
+						Smoke->SecondsBeforeInactive = 1.f;
+						Smoke->RegisterComponent();
+						A->AddInstanceComponent(Smoke);
+					}
+				}
+
 				if (UMaterialInstanceDynamic* MID = Comp->CreateDynamicMaterialInstance(0))
 				{
 					A->Parts[Idx].MID = MID;

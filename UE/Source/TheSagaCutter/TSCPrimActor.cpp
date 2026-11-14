@@ -5,6 +5,7 @@
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 
@@ -127,26 +128,7 @@ USceneComponent* ATSCPrimActor::AddPivot(const FVector& Loc, USceneComponent* Pa
 
 void ATSCPrimActor::AddLight(const FVector& Loc, const FLinearColor& Col, float LivingIntensity, float AshenIntensity, float Radius)
 {
-	UPointLightComponent* Light = NewObject<UPointLightComponent>(this);
-	Light->SetMobility(EComponentMobility::Movable);
-	Light->SetupAttachment(Root);
-	Light->SetRelativeLocation(Loc);
-	Light->SetIntensityUnits(ELightUnits::Unitless);
-	Light->SetIntensity(LivingIntensity);
-	Light->SetLightColor(Col);
-	Light->SetAttenuationRadius(Radius);
-	Light->SetCastShadows(false);
-	Light->bUseInverseSquaredFalloff = false;
-	Light->SetLightFalloffExponent(3.f);
-	Light->RegisterComponent();
-	AddInstanceComponent(Light);
-
-	FTSCLight L;
-	L.Comp = Light;
-	L.LInt = LivingIntensity;
-	L.AInt = AshenIntensity;
-	L.Phase = FMath::FRand() * 10.f;
-	Lights.Add(L);
+	// Decorative lights are disabled; fire visuals are provided by the VFX assets.
 }
 
 void ATSCPrimActor::StartSagaTransition(float Target, float Delay)
@@ -205,6 +187,23 @@ void ATSCPrimActor::Refresh()
 		if (!P.bShown) { V = 0.f; }
 
 		const bool bVisible = V > 0.02f;
+		// Smoke belongs to its chimney's construction step and stops in the Ashen saga.
+		for (USceneComponent* Child : P.Comp->GetAttachChildren())
+		{
+			if (UParticleSystemComponent* Smoke = Cast<UParticleSystemComponent>(Child))
+			{
+				if (!Smoke->ComponentHasTag(TEXT("TSC_ChimneySmoke"))) { continue; }
+				const bool bSmoking = bVisible && BuildProgress >= 0.999f && SagaAlpha < 0.95f;
+				// A stopped system still reports IsActive() while its last particles fade, so check bWasDeactivated too:
+				// otherwise smoke switched off and on again within a few seconds would never come back.
+				const bool bRunning = Smoke->IsActive() && !Smoke->bWasDeactivated;
+				if (bRunning != bSmoking)
+				{
+					if (bSmoking) { Smoke->ActivateSystem(); } else { Smoke->DeactivateSystem(); }
+				}
+			}
+		}
+
 		if (P.Comp->IsVisible() != bVisible)
 		{
 			P.Comp->SetVisibility(bVisible);

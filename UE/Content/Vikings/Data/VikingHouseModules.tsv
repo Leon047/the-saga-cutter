@@ -74,3 +74,10 @@ WALL_Up_Window	Tripo	/Game/Vikings/Buildings/VikingHouse/Meshes/SM_VH_WALL_Up_Wi
 WIN_Attic	Blender	/Game/Vikings/Buildings/VikingHouse/Meshes/SM_VH_WIN_Attic.SM_VH_WIN_Attic	80.0	16.5	76.8
 WIN_Large	Blender	/Game/Vikings/Buildings/VikingHouse/Meshes/SM_VH_WIN_Large.SM_VH_WIN_Large	110.0	16.5	74.8
 WIN_Small	Blender	/Game/Vikings/Buildings/VikingHouse/Meshes/SM_VH_WIN_Small.SM_VH_WIN_Small	80.0	16.5	62.7
+PROP_Shield_01	Imported	/Game/Props/Shield/SM_Shield_01.SM_Shield_01	18.5	85.6	85.6
+PROP_Shield_02	Imported	/Game/Props/Shield/SM_Shield_02.SM_Shield_02	18.5	85.6	85.6
+PROP_Shield_03	Imported	/Game/Props/Shield/SM_Shield_03.SM_Shield_03	18.5	85.6	85.6
+PROP_Shield_04	Imported	/Game/Props/Shield/SM_Shield_04.SM_Shield_04	18.5	70.3	70.3
+PROP_Shield_05	Imported	/Game/Props/Shield/SM_Shield_05.SM_Shield_05	18.5	70.3	70.3
+PROP_Shield_06	Imported	/Game/Props/Shield/SM_Shield_06.SM_Shield_06	18.5	70.3	70.3
+PROP_Shield_07	Imported	/Game/Props/Shield/SM_Shield_07.SM_Shield_07	18.5	70.3	70.3
