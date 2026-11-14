@@ -2,6 +2,10 @@
 
 A Viking-themed colony sim made for a game jam. Unreal Engine **5.9**, C++ module + Blueprints.
 
+## Team
+
+Sunshine is [synoecium](https://synoecium.itch.io/), [vidiaikin](https://itch.io/profile/vidiaikin), and [mrleon47](https://itch.io/profile/mrleon47).
+
 ## Layout
 
 ```
@@ -17,6 +21,12 @@ UE/                       the Unreal project  (open UE/TheSagaCutter.uproject)
 
 1. Open `UE/TheSagaCutter.uproject` with UE 5.9 (right-click -> Generate Visual Studio project files for C++ work).
 2. Build `TheSagaCutterEditor | Win64 | Development` (VS 2022) the first time; later changes can use Live Coding.
+
+## Jam submission
+
+Run `sh Scripts/package_jam.sh Sunshine` to build the Windows submission and create `Packaged/Sunshine_TheSagaCutter.zip`.
+
+See [third-party asset credits and provenance](Docs/ThirdPartyAssets.md).
 
 ## Claude + MCP
 
