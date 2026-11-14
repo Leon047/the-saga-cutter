@@ -120,6 +120,8 @@ namespace
 	// Prologue beats (seconds): landfall, clearing, raising, the forest wakes, hold and fade.
 	const float ProTLand = 8.f, ProTClear = 20.f, ProTRaise = 34.f, ProTWake = 45.f, ProTEnd = 51.f;
 	const float ProShipRun = 2400.f;
+	/** Seconds the sail takes to come down once the ship has stopped; the crew lands after that. */
+	const float ProSailDrop = 2.f;
 	const float DefaultCamArm = 16500.f;
 	TAutoConsoleVariable<int32> CVarPrologue(TEXT("tsc.Prologue"), 1,
 		TEXT("0: the title screen shows the finished village instead of the landfall prologue (also -NoPrologue)."));
@@ -667,8 +669,9 @@ void ATSCGameMode::BuildWorld()
 	{
 		ShipMooring = CellF(30.6f, 14.4f) + FVector(0.f, 0.f, -6.f);
 		Longship = SpawnPrim(ShipMooring, TSCRegion::Dock);
-		BuildLongship(Longship);
+		LongshipSail = BuildLongship(Longship);
 		Longship->Refresh();
+		SetSailHoisted(0.f); // moored: the sail is down (the prologue hoists it for the voyage)
 	}
 	// water is blocked except the dock and the shallows
 	for (int32 X = 30; X < GW; ++X)
@@ -890,6 +893,11 @@ void ATSCGameMode::BuildPrologueExtras()
 	});
 }
 
+void ATSCGameMode::SetSailHoisted(float Alpha)
+{
+	if (LongshipSail) { LongshipSail->SetRelativeScale3D(FVector(1.f, 1.f, FMath::Clamp(Alpha, 0.03f, 1.f))); }
+}
+
 void ATSCGameMode::SetCameraView(const FVector& Loc, float Arm)
 {
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
@@ -916,6 +924,7 @@ void ATSCGameMode::StartPrologue()
 	ProCaptionAlpha = 0.f;
 
 	Longship->SetActorLocation(ShipMooring + FVector(ProShipRun, 0.f, 0.f));
+	SetSailHoisted(1.f); // under sail on the way in
 	for (ATSCPrimActor* S : WallSegs) { S->SetActorHiddenInGame(true); }
 	for (ATSCPrimActor* D : ProDressing) { D->SetActorHiddenInGame(true); }
 	for (AActor* A : ProLevelProps) { if (A) { A->SetActorHiddenInGame(true); } }
@@ -952,6 +961,7 @@ void ATSCGameMode::EndPrologue()
 	ProCaptionAlpha = 0.f;
 
 	Longship->SetActorLocation(ShipMooring);
+	SetSailHoisted(0.f);
 	for (ATSCPrimActor* S : WallSegs)
 	{
 		S->SetActorScale3D(FVector::OneVector);
@@ -1008,6 +1018,9 @@ void ATSCGameMode::SimPrologue(float Dt)
 		const float A = FMath::Clamp(T / (ProTLand - 0.5f), 0.f, 1.f);
 		const float Left = FMath::Pow(1.f - A, 3.f);
 		Longship->SetActorLocation(ShipMooring + FVector(ProShipRun * Left, 0.f, 0.f));
+		// The ship stops at ProTLand - 0.5; then the sail comes down, and only after that the crew goes ashore.
+		const float Lowered = FMath::Clamp((T - (ProTLand - 0.5f)) / ProSailDrop, 0.f, 1.f);
+		SetSailHoisted(1.f - FMath::SmoothStep(0.f, 1.f, Lowered));
 		if (T >= ProTLand - 0.6f && !bProLandingPlayed)
 		{
 			bProLandingPlayed = true;
@@ -1016,7 +1029,7 @@ void ATSCGameMode::SimPrologue(float Dt)
 	}
 
 	// ----- people: ashore one by one, then to the trees, then to the building sites, then home -----
-	while (ProLanded < NumHomeUnits && T > ProTLand - 0.8f + ProLanded * 0.45f)
+	while (ProLanded < NumHomeUnits && T > ProTLand - 0.5f + ProSailDrop + 0.3f + ProLanded * 0.45f)
 	{
 		const int32 I = ProLanded++;
 		ATSCUnit* U = Units[I];

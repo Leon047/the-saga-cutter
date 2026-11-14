@@ -63,7 +63,8 @@ namespace TSC
 	void BuildRock(ATSCPrimActor* A, int32 Seed);
 	void BuildMushrooms(ATSCPrimActor* A, int32 Seed);
 	void BuildRuneStone(ATSCPrimActor* A, bool bHammer);
-	void BuildLongship(ATSCPrimActor* A);
+	/** Returns the pivot at the foot of the sail (scale its Z to lower the sail), or null if the ship has none. */
+	USceneComponent* BuildLongship(ATSCPrimActor* A);
 	void BuildPlotMarker(ATSCPrimActor* A, int32 W, int32 H);
 	void BuildLogPile(ATSCPrimActor* A);
 	void BuildTorch(ATSCPrimActor* A);

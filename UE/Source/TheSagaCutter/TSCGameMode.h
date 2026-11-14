@@ -297,6 +297,9 @@ private:
 	void SetCameraView(const FVector& Loc, float Arm);
 
 	UPROPERTY() TObjectPtr<ATSCPrimActor> Longship;
+	/** Pivot at the foot of the longship's sail: Z scale 1 = hoisted, ~0 = lowered onto the deck. */
+	UPROPERTY() TObjectPtr<USceneComponent> LongshipSail;
+	void SetSailHoisted(float Alpha);
 	FVector ShipMooring = FVector::ZeroVector;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> WallSegs;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProBuildings;

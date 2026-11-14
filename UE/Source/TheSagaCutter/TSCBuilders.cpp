@@ -931,9 +931,66 @@ namespace TSC
 		}
 	}
 
-	void BuildLongship(ATSCPrimActor* A)
+	USceneComponent* BuildLongship(ATSCPrimActor* A)
 	{
-		// Hull along X, bow to the east.
+		// The imported drakkar (Content/Drakar). Its own materials are kept. Tuning: ShipLength is stem to stern in cm,
+		// ShipYaw turns it if the bow points the wrong way (it must point east, +X); the long axis is found automatically.
+		static UStaticMesh* Ship = LoadNaturalMesh(TEXT("/Game/Drakar/Viking_Ship.Viking_Ship"));
+		if (Ship)
+		{
+			constexpr float ShipLength = 720.f;
+			constexpr float ShipYaw = 0.f;
+			const FBoxSphereBounds B = Ship->GetBounds();
+			const FVector Size = B.BoxExtent * 2.0;
+			const float Scale = ShipLength / (float)FMath::Max3(Size.X, Size.Y, 1.0);
+			const FRotator Rot(0.f, ShipYaw + (Size.Y > Size.X ? 90.f : 0.f), 0.f);
+			// centred on the actor, keel ShipKeelZ above the actor (the sea sets the actor's own Z; the mesh height includes
+			// the mast, so a share of it must not be used for the draught: the hull is only its lower part)
+			constexpr float ShipKeelZ = 25.f;
+			const FVector Keel(B.Origin.X, B.Origin.Y, B.Origin.Z - B.BoxExtent.Z);
+			const FVector Loc = -Rot.RotateVector(Keel * Scale) + FVector(0.f, 0.f, ShipKeelZ);
+			A->AddMeshPart(Ship, Loc, Rot, FVector(Scale));
+
+			// The sail is a separate mesh (Content/Drakar/Sail). If it was authored in the hull's frame (its centre lies inside
+			// the hull's bounds) it gets the very same transform; otherwise it is fitted onto the mast by size. It is shown
+			// only while the dock is Living.
+			static UStaticMesh* SailMesh = LoadNaturalMesh(TEXT("/Game/Drakar/Sail.Sail"));
+			const float Top = Size.Z * Scale + ShipKeelZ;
+			if (SailMesh)
+			{
+				const FBoxSphereBounds SB = SailMesh->GetBounds();
+				const FBox HullBox = FBox::BuildAABB(B.Origin, B.BoxExtent * 1.15);
+				// SailLoc / SailScale: where the sail mesh origin sits on the ship and how big it is.
+				FVector SailLoc = Loc;
+				float SailScale = Scale;
+				if (!HullBox.IsInside(SB.Origin))
+				{
+					SailScale = 0.6f * Top / (float)FMath::Max(SB.BoxExtent.Z * 2.0, 1.0);
+					const FVector Bottom(SB.Origin.X, SB.Origin.Y, SB.Origin.Z - SB.BoxExtent.Z);
+					SailLoc = -Rot.RotateVector(Bottom * SailScale) + FVector(0.f, 0.f, 0.32f * Top);
+				}
+				// The sail hangs on a pivot at its foot: scaling the pivot's Z lowers it onto the deck (see ATSCGameMode).
+				const FVector Foot(SB.Origin.X, SB.Origin.Y, SB.Origin.Z - SB.BoxExtent.Z);
+				const FVector PivotLoc = SailLoc + Rot.RotateVector(Foot * SailScale);
+				USceneComponent* Pivot = A->AddPivot(PivotLoc);
+				const int32 SailPart = A->AddMeshPart(SailMesh, SailLoc - PivotLoc, Rot, FVector(SailScale), Pivot);
+				A->SetVis(SailPart, ETSCVis::LivingOnly);
+				return Pivot;
+			}
+			// Without the sail asset: a striped one from primitives.
+			const float SailW = 0.32f * ShipLength;
+			const float SailH = 0.6f * Top;
+			const float SailZ = 0.32f * Top + SailH * 0.5f;
+			constexpr int32 Strips = 5;
+			for (int32 I = 0; I < Strips; ++I)
+			{
+				const int32 Sail = A->AddPart(ETSCShape::Cube, FVector(-SailW * 0.5f + SailW / Strips * (I + 0.5f), 0.f, SailZ), FRotator::ZeroRotator,
+					FVector(SailW / Strips / 100.f, 0.04f, SailH / 100.f), I % 2 ? FLinearColor(0.6f, 0.56f, 0.48f) : Pal::Red);
+				A->SetVis(Sail, ETSCVis::LivingOnly);
+			}
+			return nullptr;
+		}
+		// Fallback without the asset: a primitive hull along X, bow to the east.
 		const int32 Hull = A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 26.f), FRotator::ZeroRotator, FVector(5.2f, 1.1f, 0.5f), Pal::Timber * 1.1f);
 		A->SetAshen(Hull, Pal::Char);
 		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 50.f), FRotator::ZeroRotator, FVector(5.0f, 0.9f, 0.06f), Pal::Plank);
@@ -958,6 +1015,7 @@ namespace TSC
 			A->SetVis(Sh, I % 3 == 0 ? ETSCVis::Both : ETSCVis::LivingOnly);
 			A->SetAshen(Sh, Pal::Char);
 		}
+		return nullptr;
 	}
 
 	void BuildRaiderBoat(ATSCPrimActor* A)
