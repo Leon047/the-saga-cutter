@@ -1043,7 +1043,7 @@ void ATSCGameMode::SimPrologue(float Dt)
 	// ----- captions: one line per beat -----
 	{
 		static const TCHAR* Lines[4] = {
-			TEXT("They came on the grey tide, one ship and forty souls."),
+			TEXT("The Cutsalots came on the grey tide, one ship and forty souls."),
 			TEXT("The forest was old. They did not ask its leave."),
 			TEXT("Timber became wall, and wall became home."),
 			TEXT("But every stump was counted. The forest remembers.") };
@@ -2499,7 +2499,7 @@ void ATSCGameMode::BuildEpilogue(bool bHallFell)
 	else if (NumAshen == 0) { EpilogueTitle = TEXT("THE SAGA OF THE GREEN CLEARING"); }
 	else { EpilogueTitle = TEXT("THE SAGA OF TWO TELLINGS"); }
 
-	Epilogue.Add(TEXT("Hear me, the skald, for I sing it as the Saga Cutter cut it."));
+	Epilogue.Add(TEXT("Hear me, the skald, for I sing the saga you cut."));
 
 	// the garden
 	Epilogue.Add(Scenes[0].bAshen

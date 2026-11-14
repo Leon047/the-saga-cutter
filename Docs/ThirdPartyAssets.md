@@ -25,7 +25,7 @@ The Megascans assets were imported at the medium quality tier. The game applies 
 ## Other credited content
 
 - **Roboto** by Google. The HUD uses the Roboto font bundled with Unreal Engine. See the [bundled Roboto license](Roboto-LICENSE.txt).
-- **Tripo**. The Viking house kit includes Tripo-generated meshes alongside team-built Blender modules. See the [module inventory](VikingHouseKit.md). The axolotl warrior villager (`Content/Characters/axolotl_warrior`) is a Tripo-generated mesh, texture set and rig, made from the team's reference art in `Docs/References/FurryAxolotlClasses` with a T-pose sheet drawn in ChatGPT. The archer, druid, blacksmith and jarl heroes (`Content/Characters/axolotl_archer`, `axolotl_druid`, `axolotl_blacksmith`, `axolotl_jarl`) are made the same way, each from the team's reference art with a T-pose sheet drawn in ChatGPT. Their animations are retargeted from the Viking character clips.
+- **Tripo**. The Viking house kit includes Tripo-generated meshes alongside team-built Blender modules. See the [module inventory](VikingHouseKit.md). The Cutsalot warrior villager (`Content/Characters/axolotl_warrior`) is a Tripo-generated mesh, texture set and rig, made from the team's reference art in `Docs/References/FurryAxolotlClasses` with a T-pose sheet drawn in ChatGPT. The archer, druid, blacksmith and jarl heroes (`Content/Characters/axolotl_archer`, `axolotl_druid`, `axolotl_blacksmith`, `axolotl_jarl`) are made the same way, each from the team's reference art with a T-pose sheet drawn in ChatGPT. Their animations are retargeted from the Viking character clips.
 - **ElevenLabs**. The repository includes generation scripts for the soundtrack and environmental sound effects.
 
 ## Provenance to confirm

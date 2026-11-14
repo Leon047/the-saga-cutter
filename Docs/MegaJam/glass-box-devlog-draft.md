@@ -1,6 +1,6 @@
-# The Spruce at the Gate | Making The Saga Cutter
+# The Spruce at the Gate | Making Cutsalots: Take One
 
-On the first day in *The Saga Cutter*, a spruce crashes across the west gate and traps Hakon, the village hunter, outside. Shapes are coming through the fog. Press **CUT!** and you can choose a version of the story in which the tree never grew.
+On the first day in *Cutsalots: Take One*, a spruce crashes across the west gate and traps Hakon, the village hunter, outside. Shapes are coming through the fog. Press **CUT!** and you can choose a version of the story in which the tree never grew.
 
 ![Overhead view of the torchlit west gate in a curved timber wall, with pine forest outside and village houses inside](../Screenshots/Saga_RoundPalisade_Gate.png)
 
@@ -38,4 +38,4 @@ After the siege, the epilogue checks which take you kept and whether Hakon survi
 
 We checked that connection with an autoplay run that followed a fixed sequence of Living and Ashen takes. We chose Ashen at the gate, and on the final night the village spent 200 wood bracing it. The gate held until dawn. When the skald told the story in the epilogue, he remembered the hunter who walked home through ash and whose bow helped hold the gate.
 
-*The Saga Cutter was built for the 2026 Epic AI MegaJam by Sunshine.* The team is [synoecium](https://synoecium.itch.io/), [vidiaikin](https://itch.io/profile/vidiaikin), and [mrleon47](https://itch.io/profile/mrleon47).
+*Cutsalots: Take One was built for the 2026 Epic AI MegaJam by Sunshine.* The team is [synoecium](https://synoecium.itch.io/), [vidiaikin](https://itch.io/profile/vidiaikin), and [mrleon47](https://itch.io/profile/mrleon47).

@@ -1,8 +1,8 @@
 # From a Viking Village Concept to a Playable Settlement
 
-*The Saga Cutter environment devlog · Naidjen · November 12–14, 2026*
+*Cutsalots: Take One environment devlog · Naidjen · November 12–14, 2026*
 
-The first image of our Viking village had moss-covered roofs, pine trees, and warm lanterns against a cool forest. It also posed a practical question for *The Saga Cutter*: from the high strategy camera, would you be able to pick out the jarl’s hall, the smithy, and the sawmill at a glance?
+The first image of our Viking village had moss-covered roofs, pine trees, and warm lanterns against a cool forest. It also posed a practical question for *Cutsalots: Take One*: from the high strategy camera, would you be able to pick out the jarl’s hall, the smithy, and the sawmill at a glance?
 
 ![Early settlement concept with timber buildings and pine forest](environment-devlog-images/figure-1.jpg)
 

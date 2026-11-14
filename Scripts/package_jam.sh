@@ -86,7 +86,7 @@ fi
 cp "$ROOT/Docs/ThirdPartyAssets.md" "$ROOT/Docs/Roboto-LICENSE.txt" "$ROOT/Docs/VikingHouseKit.md" "$OUT/Windows/" || exit 1
 gate "$OUT/Windows" || exit 1
 
-ZIP="$OUT/${TEAM}_TheSagaCutter.zip"
+ZIP="$OUT/${TEAM}_Cutsalots_Take_One.zip"
 rm -f "$ZIP"
 powershell.exe -NoProfile -Command "Compress-Archive -Path '$OUT/Windows' -DestinationPath '$ZIP' -Force" || { echo "Zip failed" >&2; exit 1; }
 BYTES="$(wc -c < "$ZIP" | tr -d ' ')"

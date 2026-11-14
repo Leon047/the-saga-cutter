@@ -3,13 +3,13 @@ Keys match the drawn English exactly (case and spaces matter). In keys every run
 and the value names the numbers {0}, {1} in order. See README.md.
 
 == Title screen ==
-THE SAGA CUTTER	МОНТАЖЁР САГ
+Cutsalots: Take One	Cutsalots: Take One
 three days, one night, two sagas	три дня, одна ночь, две саги
 Space to start Day 1	Пробел — начать День 1
 START DAY 1	НАЧАТЬ ДЕНЬ 1
 
 == Prologue captions ==
-They came on the grey tide, one ship and forty souls.	Они пришли с серым приливом: один корабль и сорок душ.
+The Cutsalots came on the grey tide, one ship and forty souls.	Катсалоты пришли с серым приливом: один корабль и сорок душ.
 The forest was old. They did not ask its leave.	Лес был стар. Они не спросили у него дозволения.
 Timber became wall, and wall became home.	Бревно стало стеной, а стена стала домом.
 But every stump was counted. The forest remembers.	Но каждый пень сочтён. Лес помнит.
@@ -31,7 +31,7 @@ BUILDING	СТРОЙКА
 the scene is recut	сцена перемонтирована
 
 == HUD: job panel ==
-YOUR PEOPLE	ТВОИ ЛЮДИ
+YOUR CUTSALOTS	ТВОИ КАТСАЛОТЫ
 Woodcutters	Лесорубы
 Gatherers	Собиратели
 Builders / at prayer	Строят / молятся
@@ -184,7 +184,7 @@ THE SAGA OF THE GREEN CLEARING	САГА О ЗЕЛЁНОЙ ПОЛЯНЕ
 THE SAGA OF TWO TELLINGS	САГА О ДВУХ СКАЗАНИЯХ
 
 == Epilogue: lines ==
-Hear me, the skald, for I sing it as the Saga Cutter cut it.	Слушай меня, скальда: я пою сагу так, как её смонтировал Монтажёр саг.
+Hear me, the skald, for I sing the saga you cut.	Слушай меня, скальда: я пою сагу, которую ты смонтировал.
 When the boar came, you gave the garden a wall of old burnt stone. Not a cabbage was lost, and ever after the thin grey soil gave a little less.	Когда пришёл вепрь, ты дал огороду стену из старого горелого камня. Ни один кочан не пропал, но с тех пор скудная серая земля родила чуть меньше.
 When the boar came, you let the saga run. It trampled the green rows, the gardeners cursed, and the good soil forgave them by next morning.	Когда пришёл вепрь, ты дал саге идти своим чередом. Он истоптал зелёные гряды, огородники бранились, а добрая земля простила их к утру.
 You burned the western forest out of the telling so that no spruce could bar the gate. Hakon the hunter walked home through ash, and on the last night it was his bow that held that gate.	Ты выжег западный лес из сказания, чтобы ни одна ель не преградила ворота. Хакон-охотник вернулся домой по пеплу, и в последнюю ночь именно его лук удержал те ворота.

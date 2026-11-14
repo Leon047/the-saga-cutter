@@ -1,4 +1,4 @@
-# THE SAGA CUTTER — game jam build brief
+# Cutsalots: Take One — game jam build brief
 
 ## Goal
 Build a small, complete, playable Viking settlement sim in this Unreal Engine 5.9
@@ -7,7 +7,7 @@ project: one forest clearing by the sea, three days and one final night, about
 when in doubt, cut scope, not polish.
 
 ## Pitch
-You are the Saga Cutter. Your settlement exists in two possible sagas, and you
+Your Cutsalot settlement exists in two possible sagas, and you
 switch between them to edit the events that decide your people's fate.
 
 - The Living Saga: a misty, overgrown forest, rich in timber, food and glowing

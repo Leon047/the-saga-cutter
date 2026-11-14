@@ -1,6 +1,6 @@
-# The Saga Cutter
+# Cutsalots: Take One
 
-A Viking-themed colony sim made for a game jam. Unreal Engine **5.9**, C++ module + Blueprints.
+A Viking-themed colony sim starring the Cutsalots, made for a game jam. Unreal Engine **5.9**, C++ module + Blueprints.
 
 ## Team
 
@@ -24,7 +24,7 @@ UE/                       the Unreal project  (open UE/TheSagaCutter.uproject)
 
 ## Jam submission
 
-Run `sh Scripts/package_jam.sh Sunshine` to build the Windows submission and create `Packaged/Sunshine_TheSagaCutter.zip`.
+Run `sh Scripts/package_jam.sh Sunshine` to build the Windows submission and create `Packaged/Sunshine_Cutsalots_Take_One.zip`.
 
 See [third-party asset credits and provenance](Docs/ThirdPartyAssets.md).
 

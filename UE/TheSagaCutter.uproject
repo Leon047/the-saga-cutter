@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"EngineAssociation": "5.9",
 	"Category": "",
-	"Description": "Viking colony sim - game jam project",
+	"Description": "Cutsalots: Take One, a Viking colony sim",
 	"Modules": [
 		{
 			"Name": "TheSagaCutter",

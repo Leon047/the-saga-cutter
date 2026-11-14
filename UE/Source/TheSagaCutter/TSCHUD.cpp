@@ -453,7 +453,7 @@ void ATSCHUD::DrawJobs(ATSCGameMode* GM)
 {
 	const float X = 18.f, Y = 96.f, W = 330.f;
 	WoodPanel(X, Y, W, 196.f);
-	Txt(TEXT("YOUR PEOPLE"), X + 20.f, Y + 12.f, 17.f, Gold);
+	Txt(TEXT("YOUR CUTSALOTS"), X + 20.f, Y + 12.f, 17.f, Gold);
 	Knot(X + W - 40.f, Y + 24.f, 7.f, FLinearColor(Gold.R, Gold.G, Gold.B, 0.5f));
 	const bool bIdle = GM->NumIdle > 0 && !GM->IsFrozen();
 	const ETSCDayOnePrompt Prompt = GM->GetDayOnePrompt();
@@ -742,7 +742,7 @@ void ATSCHUD::DrawTitle(ATSCGameMode* GM)
 	}
 	Box(0.f, 0.f, SW, Bar, FLinearColor(0.f, 0.f, 0.f, 0.94f));
 	Box(0.f, SH - Bar, SW, Bar, FLinearColor(0.f, 0.f, 0.f, 0.94f));
-	Txt(TEXT("THE SAGA CUTTER"), 48.f, 12.f, 44.f, Gold, 0);
+	Txt(TEXT("Cutsalots: Take One"), 48.f, 12.f, 44.f, Gold, 0);
 	Txt(TEXT("three days, one night, two sagas"), 50.f, 64.f, 17.f, Dim, 0, false);
 	Txt(TEXT("Space to start Day 1"), SW - 48.f, 38.f, 16.f, Dim, 2, false);
 	if (GM->bPrologue && GM->ProCaptionAlpha > 0.f)

@@ -1,8 +1,8 @@
 # From a Flat Map to a Viking Fjord
 
-*The Saga Cutter environment devlog · Synoecium · November 14, 2026*
+*Cutsalots: Take One environment devlog · Synoecium · November 14, 2026*
 
-The first sea in *The Saga Cutter* was the top of a dark box. It marked the edge of the settlement, but in the prologue we ask the player to watch a longship sail in and see where the settlers choose to build. I wanted the coast to do some of that storytelling. The new shoreline sits at the foot of a mountain range, with a river coming in from the south and enough sheltered water for the village to have a dock.
+The first sea in *Cutsalots: Take One* was the top of a dark box. It marked the edge of the settlement, but in the prologue we ask the player to watch a longship sail in and see where the settlers choose to build. I wanted the coast to do some of that storytelling. The new shoreline sits at the foot of a mountain range, with a river coming in from the south and enough sheltered water for the village to have a dock.
 
 ![The longship approaching the shore in the prologue](water-and-landscape-devlog-images/Nordic-Final-Prologue.jpg)
 
@@ -54,6 +54,6 @@ Near the coast I widened the channel, added gravel bars, and eased off the rapid
 
 The camera also drives the ambience mix. Focus on the river and the current comes up. Move across to the dock and the surf gets louder. There’s wind toward the mountains, birds over the woods by day, and occasional owl calls after dark. I used ElevenLabs to generate the sound effects and mixed the loops in Unreal as the camera moves around the map.
 
-*The Saga Cutter was built for the 2026 Epic AI MegaJam by Team Sunshine.*
+*Cutsalots: Take One was built for the 2026 Epic AI MegaJam by Team Sunshine.*
 
 [Ocean implementation notes](../Plans/stylized-ocean.md) · [Landscape implementation notes](../Plans/landscape-mountains-river.md)
