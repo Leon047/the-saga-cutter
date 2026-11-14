@@ -134,6 +134,10 @@ Playthrough gotchas (hit in practice):
 - **Black video** (~50 KB for 30 s): MRQ used `MoviePipelineGameMode`, so the runtime world and its lights never
   spawned. Set the override via `soft_game_mode_override` with a loaded UClass (`unreal.load_class`); the old
   `game_mode_override` property is deprecated and silently ignored. Check the log for `Game class is '<YourGameMode>'`.
+- **Forest where the village should be / half-built houses** (TheSagaCutter): the title screen plays a looping
+  landfall prologue (`ATSCGameMode::SimPrologue`). `ue_demo.render` turns it off with the console variable
+  `tsc.Prologue 0`, which stays off for the rest of the editor session (PIE included); set `tsc.Prologue 1` to get it
+  back. A packaged or `-game` run takes `-NoPrologue`. `TSCAuto` ends the prologue by itself.
 - Waiting on the log line `MoviePipelineLinearExecutorBase finished` alone races: the render may finish before you
   start counting, or PNGs still be flushing. Count frames (the wait script does).
 - Do not edit the sequence while a render runs; wait for it, then edit and re-render.

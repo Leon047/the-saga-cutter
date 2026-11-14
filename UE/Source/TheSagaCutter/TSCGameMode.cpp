@@ -32,6 +32,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "TSCHUD.h"
 #include "TSCLoc.h"
+#include "TSCOcean.h"
 #include "TSCPlayerController.h"
 #include "TSCPrimActor.h"
 #include "TheSagaCutter.h"
@@ -424,14 +425,17 @@ void ATSCGameMode::BuildWorld()
 	// ----- ground: big base tiles, then one tile per cell in the editable regions -----
 	{
 		ATSCPrimActor* Base = SpawnPrim(FVector(0.f, 0.f, -8.f));
-		Base->AddPart(ETSCShape::Cube, FVector::ZeroVector, FRotator::ZeroRotator, FVector(900.f, 900.f, 0.02f), Pal::ForestFloor * 0.8f);
+		// The base stops at the waterline (X = CellF(28).X): under the sea it would show through the wave troughs.
+		{
+			const float West = -45000.f, East = CellF(28.f, 12.f).X;
+			Base->AddPart(ETSCShape::Cube, FVector((West + East) * 0.5f, 0.f, 0.f), FRotator::ZeroRotator, FVector((East - West) / 100.f, 900.f, 0.02f), Pal::ForestFloor * 0.8f);
+		}
 		// settlement green
 		MeadowPart = Base->AddPart(ETSCShape::Cube, FVector(CellF(17.f, 12.f).X, 0.f, 3.f), FRotator::ZeroRotator, FVector(18.f * 2.f, 34.f * 2.f, 0.02f), Pal::Grass);
 		GroundBase = Base;
-		// rocky shore
-		Base->AddPart(ETSCShape::Cube, FVector(CellF(27.f, 12.f).X, 0.f, 4.f), FRotator::ZeroRotator, FVector(4.f, 34.f * 2.f, 0.03f), Pal::Shore);
-		WaterActor = SpawnPrim(FVector(CellF(28.f, 12.f).X + 20000.f, 0.f, -2.f));
-		WaterActor->AddPart(ETSCShape::Cube, FVector::ZeroVector, FRotator::ZeroRotator, FVector(400.f, 900.f, 0.04f), Pal::Water);
+		// The shore (a beach along a fractal waterline, X 1800 .. ShoreXAt(Y)) is built by the ocean.
+		Ocean =GetWorld()->SpawnActor<ATSCOcean>(ATSCOcean::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
+		Ocean->Build(CellF(28.f, 12.f).X, 0.f);
 
 		// trodden paths: gate -> hall -> dock, and to the stones
 		ATSCPrimActor* Paths = SpawnPrim(FVector(0.f, 0.f, 0.f));
@@ -654,6 +658,33 @@ void ATSCGameMode::BuildWorld()
 	RaiderBoat->Refresh();
 	RaiderBoat->SetActorHiddenInGame(true);
 
+	// the sea owns the Z, pitch and roll of everything that floats
+	Ocean->AddFloater(Longship, 300.f, 55.f, -6.f, 420.f);
+	Ocean->AddFloater(RaiderBoat, 190.f, 45.f, -4.f, 300.f);
+	{
+		const FVector2D BarrelCells[3] = { FVector2D(29.3f, 9.6f), FVector2D(30.4f, 15.9f), FVector2D(32.2f, 10.4f) };
+		const FVector2D WoodCells[4] = { FVector2D(29.8f, 10.3f), FVector2D(31.0f, 13.4f), FVector2D(32.6f, 12.6f), FVector2D(30.2f, 8.4f) };
+		for (int32 I = 0; I < 3; ++I)
+		{
+			ATSCPrimActor* A = SpawnPrim(CellF(BarrelCells[I].X, BarrelCells[I].Y), TSCRegion::Dock);
+			BuildBarrel(A);
+			A->Refresh();
+			A->SetActorRotation(FRotator(0.f, Rand01(I, 7) * 360.f, 0.f));
+			Flotsam.Add(A);
+			ProDressing.Add(A);
+			Ocean->AddFloater(A, 40.f, 22.f, 0.f, 0.f, true);
+		}
+		for (int32 I = 0; I < 4; ++I)
+		{
+			ATSCPrimActor* A = SpawnPrim(CellF(WoodCells[I].X, WoodCells[I].Y), TSCRegion::Dock);
+			BuildDriftwood(A, I);
+			A->Refresh();
+			A->SetActorRotation(FRotator(0.f, Rand01(I, 7) * 360.f, 0.f));
+			Flotsam.Add(A);
+			Ocean->AddFloater(A, 80.f, 14.f, 0.f, 0.f, true);
+		}
+	}
+
 	HammerStone = SpawnPrim(CellCenter(16, 2));
 	BuildRuneStone(HammerStone, true);
 	HammerStone->Refresh();
@@ -818,6 +849,7 @@ void ATSCGameMode::StartPrologue()
 	ProTime = 0.f;
 	ProLanded = 0;
 	ProStage = 0;
+	bProLandingPlayed = false;
 	ProDusk = 0.f;
 	ProFade = 1.f;
 	ProCaption.Empty();
@@ -909,7 +941,12 @@ void ATSCGameMode::SimPrologue(float Dt)
 	{
 		const float A = FMath::Clamp(T / (ProTLand - 0.5f), 0.f, 1.f);
 		const float Left = FMath::Pow(1.f - A, 3.f);
-		Longship->SetActorLocation(ShipMooring + FVector(ProShipRun * Left, 0.f, 5.f * FMath::Sin(WorldTime * 1.8f) * (0.25f + Left)));
+		Longship->SetActorLocation(ShipMooring + FVector(ProShipRun * Left, 0.f, 0.f));
+		if (T >= ProTLand - 0.6f && !bProLandingPlayed)
+		{
+			bProLandingPlayed = true;
+			if (Ocean) { Ocean->PlayLanding(FVector2D(Longship->GetActorLocation()) - FVector2D(300.f, 0.f)); }
+		}
 	}
 
 	// ----- people: ashore one by one, then to the trees, then to the building sites, then home -----
@@ -1087,8 +1124,48 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 			for (int32 I = 0; I < Units.Num(); ++I) { if (Units[I]) { Units[I]->Sim(Dt); } }
 		}
 	}
+	if (Ocean)
+	{
+		FTSCOceanInput In;
+		In.Time = WorldTime;
+		In.Ash = DockActor ? DockActor->SagaAlpha : 0.f;
+		In.bDaylight = Phase == ETSCPhase::Day || Phase == ETSCPhase::Title;
+		In.Focus = CellF(17.f, 12.f);
+		In.Zoom01 = 0.5f;
+		if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+		{
+			if (APawn* Pawn = PC->GetPawn()) { In.Focus = Pawn->GetActorLocation(); }
+			if (PC->PlayerCameraManager)
+			{
+				In.Zoom01 = FMath::Clamp((FVector::Dist(PC->PlayerCameraManager->GetCameraLocation(), In.Focus) - 6000.f) / 14000.f, 0.f, 1.f);
+			}
+		}
+		if (Sun)
+		{
+			In.SunColor = Sun->GetLightColor();
+			In.SunIntensity = Sun->Intensity;
+		}
+		Ocean->Sim(RealDt, In);
+	}
 	UpdateAtmosphere(RealDt);
 	if (bAuto) { AutoPlay(RealDt); }
+}
+
+float ATSCGameMode::WadeDepthAt(const FVector& P) const
+{
+	const float ShoreX = Ocean ? Ocean->ShoreXAt(P.Y) : CellF(28.f, 0.f).X;
+	if (P.X <= ShoreX) { return 0.f; }
+	if (DockActor && !DockActor->IsHidden() && DockActor->SagaAlpha < 0.5f)
+	{
+		const FVector C = CellCorner(26, 11);
+		if (P.X >= C.X && P.X <= C.X + 6.f * CELL && P.Y >= C.Y && P.Y <= C.Y + 2.f * CELL) { return 0.f; }
+	}
+	return FMath::Clamp((P.X - ShoreX) / 400.f, 0.f, 1.f) * 55.f;
+}
+
+void ATSCGameMode::WadeStep(const FVector& P, const FVector& Dir)
+{
+	if (Ocean) { Ocean->WadeStep(FVector2D(P), FVector2D(Dir)); }
 }
 
 void ATSCGameMode::UpdateAtmosphere(float Dt)
@@ -2177,7 +2254,7 @@ void ATSCGameMode::SimNight(float Dt)
 			R->OrderAssault();
 		}
 	};
-	if (Once(3, 9.f)) { RaiderWave(bDockAshen ? 2 : 3); Toast(bDockAshen ? TEXT("With no dock to land at, a few raiders wade ashore through the surf.") : TEXT("Raiders leap onto the dock!")); }
+	if (Once(3, 9.f)) { if (Ocean) { Ocean->PlayLanding(FVector2D(CellF(bDockAshen ? 29.6f : 31.5f, 11.5f)), 0.8f); } RaiderWave(bDockAshen ? 2 : 3); Toast(bDockAshen ? TEXT("With no dock to land at, a few raiders wade ashore through the surf.") : TEXT("Raiders leap onto the dock!")); }
 	if (Once(4, 34.f)) { RaiderWave(bDockAshen ? 1 : 3); }
 
 	// healing

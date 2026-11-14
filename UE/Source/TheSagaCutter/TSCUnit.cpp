@@ -554,8 +554,41 @@ void ATSCUnit::OrderAssault()
 
 void ATSCUnit::Teleport(const FVector& Pos)
 {
-	SetActorLocation(FVector(Pos.X, Pos.Y, 0.f));
+	SetActorLocation(FVector(Pos.X, Pos.Y, GM ? -GM->WadeDepthAt(FVector(Pos.X, Pos.Y, 0.f)) : 0.f));
+	LastWadePos = GetActorLocation();
 	Path.Reset();
+}
+
+void ATSCUnit::Idle(float Dt)
+{
+	UpdateWading(Dt);
+	Animate(Dt, false);
+}
+
+void ATSCUnit::UpdateWading(float Dt)
+{
+	if (!GM || bGone || bSheltered || IsHidden()) { return; }
+	const FVector Loc = GetActorLocation();
+	const float Depth = GM->WadeDepthAt(Loc);
+	const float NewZ = FMath::FInterpTo(Loc.Z, -Depth, Dt, 8.f);
+	if (!FMath::IsNearlyEqual(NewZ, Loc.Z, 0.01f))
+	{
+		SetActorLocation(FVector(Loc.X, Loc.Y, NewZ));
+	}
+	if (Depth > 6.f && !bDead && !bDowned)
+	{
+		const float Moved = FVector::Dist2D(Loc, LastWadePos);
+		if (Moved > 20.f * Dt)
+		{
+			WadeStepTimer -= Dt;
+			if (WadeStepTimer <= 0.f)
+			{
+				GM->WadeStep(Loc2D(), (Loc - LastWadePos).GetSafeNormal2D());
+				WadeStepTimer = 0.3f;
+			}
+		}
+	}
+	LastWadePos = Loc;
 }
 
 bool ATSCUnit::AtHoldPos() const
@@ -642,7 +675,9 @@ bool ATSCUnit::StepToward(const FVector& Dest, float Dt, float StopDist)
 	if (Dist > 1.f)
 	{
 		Dir /= Dist;
-		SetActorLocation(Me + Dir * FMath::Min(Dist, Speed * Dt));
+		FVector NewLoc = Me + Dir * FMath::Min(Dist, Speed * Dt);
+		NewLoc.Z = GetActorLocation().Z; // keep the wading depth (Me is flattened by Loc2D)
+		SetActorLocation(NewLoc);
 		const FRotator Want = Dir.Rotation();
 		SetActorRotation(FMath::RInterpTo(GetActorRotation(), FRotator(0.f, Want.Yaw, 0.f), Dt, 10.f));
 	}
@@ -651,6 +686,7 @@ bool ATSCUnit::StepToward(const FVector& Dest, float Dt, float StopDist)
 
 void ATSCUnit::Sim(float Dt)
 {
+	UpdateWading(Dt);
 	UpdateArrows(Dt); // arrows already in the air keep flying even if the hunter falls
 	if (bGone) { return; }
 	if (bDead)

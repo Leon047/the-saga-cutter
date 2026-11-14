@@ -186,6 +186,10 @@ def render(seq_path, map_path, job_name, game_mode=None, res=(1280, 720), warmup
     if game_mode:
         # 'game_mode_override' is deprecated and silently ignored; the soft property needs a loaded UClass
         go.set_editor_property('soft_game_mode_override', unreal.load_class(None, game_mode))
+        if 'TSCGameMode' in game_mode:
+            # TheSagaCutter plays a landfall prologue behind its title screen (ship, forest, half-built village);
+            # a flythrough wants the finished village. Set 'tsc.Prologue 1' again to film the prologue itself.
+            unreal.SystemLibrary.execute_console_command(None, 'tsc.Prologue 0')
 
     qs.render_queue_with_executor_instance(unreal.MoviePipelinePIEExecutor())
     return out

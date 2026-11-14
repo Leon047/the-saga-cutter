@@ -68,4 +68,8 @@ namespace TSC
 	void BuildLogPile(ATSCPrimActor* A);
 	void BuildTorch(ATSCPrimActor* A);
 	void BuildRaiderBoat(ATSCPrimActor* A);
+	/** A barrel on its side (axis along local X), half in the water. Living only. */
+	void BuildBarrel(ATSCPrimActor* A);
+	/** Two or three charred planks (long axis local X) with a faint ember glow. Ashen only. */
+	void BuildDriftwood(ATSCPrimActor* A, int32 Seed);
 }

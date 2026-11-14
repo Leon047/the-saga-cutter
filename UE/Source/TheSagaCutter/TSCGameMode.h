@@ -9,6 +9,7 @@
 #include "TSCGameMode.generated.h"
 
 class ATSCPrimActor;
+class ATSCOcean;
 class UAudioComponent;
 class USoundBase;
 class UDirectionalLightComponent;
@@ -201,6 +202,10 @@ public:
 	void AddTracer(const FVector& From, const FVector& To, const FLinearColor& Col);
 	void OnUnitDied(ATSCUnit* U);
 	void Toast(const FString& Text);
+	/** Visual only: how deep a unit standing at P is in the shallows (0 on land and on standing dock planks). */
+	float WadeDepthAt(const FVector& P) const;
+	/** A footstep in the shallows at P moving along Dir. */
+	void WadeStep(const FVector& P, const FVector& Dir);
 
 	/** Test helper: plays the game by itself. Take pattern is a string of L/A per scene, e.g. "LALA". */
 	UFUNCTION(Exec)
@@ -315,7 +320,9 @@ private:
 	UPROPERTY() TObjectPtr<ATSCPrimActor> DockActor;
 	TArray<int32> CrateParts;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> RaiderBoat;
-	UPROPERTY() TObjectPtr<ATSCPrimActor> WaterActor;
+	UPROPERTY() TObjectPtr<ATSCOcean> Ocean;
+	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> Flotsam;
+	bool bProLandingPlayed = false;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> HammerStone;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> StagStone;
 
