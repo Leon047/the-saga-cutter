@@ -875,6 +875,38 @@ namespace TSC
 		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 210.f), FRotator::ZeroRotator, FVector(2.2f, 0.04f, 1.6f), FLinearColor(0.3f, 0.03f, 0.03f));
 	}
 
+	void BuildBarrel(ATSCPrimActor* A)
+	{
+		// A barrel on its side, axis along local X, half in the water.
+		const FRotator Axis(90.f, 0.f, 0.f);
+		const int32 Body = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 8.f), Axis, FVector(0.46f, 0.46f, 0.7f), Pal::Plank);
+		A->SetVis(Body, ETSCVis::LivingOnly);
+		for (int32 I = 0; I < 2; ++I)
+		{
+			const int32 Hoop = A->AddPart(ETSCShape::Cylinder, FVector(I == 0 ? -20.f : 20.f, 0.f, 8.f), Axis, FVector(0.49f, 0.49f, 0.05f), Pal::Iron);
+			A->SetVis(Hoop, ETSCVis::LivingOnly);
+		}
+	}
+
+	void BuildDriftwood(ATSCPrimActor* A, int32 Seed)
+	{
+		// Charred planks, only once the dock has burned.
+		const int32 Count = 2 + (FMath::Abs(Seed) % 2);
+		for (int32 I = 0; I < Count; ++I)
+		{
+			const float R = FMath::Frac(FMath::Sin(Seed * 12.9898f + I * 78.233f) * 43758.5453f);
+			const float Yaw = (R - 0.5f) * 24.f;
+			const int32 Plank = A->AddPart(ETSCShape::Cube, FVector(R * 20.f - 10.f, (I - 0.5f * (Count - 1)) * 26.f, 4.f), FRotator(0.f, Yaw, 0.f),
+				FVector(1.6f, 0.22f, 0.08f), Pal::Char * 1.6f);
+			A->SetAshen(Plank, Pal::Char * 1.6f);
+			A->SetVis(Plank, ETSCVis::AshenOnly);
+			if (I == 0)
+			{
+				A->SetGlow(Plank, FLinearColor(2.f, 0.6f, 0.1f), FLinearColor(2.f, 0.6f, 0.1f));
+			}
+		}
+	}
+
 	void BuildPlotMarker(ATSCPrimActor* A, int32 W, int32 H)
 	{
 		const FLinearColor Col(0.9f, 0.8f, 0.4f);

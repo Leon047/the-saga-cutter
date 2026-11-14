@@ -63,7 +63,7 @@ public:
 	FVector Loc2D() const { FVector L = GetActorLocation(); L.Z = 0.f; return L; }
 	bool AtHoldPos() const;
 	/** Scripted figures that are not simulated: only the idle animation. */
-	void Idle(float Dt) { Animate(Dt, false); }
+	void Idle(float Dt);
 
 	virtual void Refresh() override;
 
@@ -117,6 +117,10 @@ private:
 	bool StepToward(const FVector& Dest, float Dt, float StopDist);
 	ATSCUnit* FindTarget() const;
 	void Animate(float Dt, bool bMoving);
+	/** Sinks the unit into the shallows (visual only) and throws splashes while it walks there. */
+	void UpdateWading(float Dt);
+	float WadeStepTimer = 0.f;
+	FVector LastWadePos = FVector::ZeroVector;
 
 	UPROPERTY()
 	TObjectPtr<ATSCGameMode> GM;

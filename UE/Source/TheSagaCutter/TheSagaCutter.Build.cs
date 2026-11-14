@@ -16,7 +16,8 @@ public class TheSagaCutter : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"StateTreeModule", "GameplayStateTreeModule", "SmartObjectsModule", "Slate", "SlateCore"
+			"StateTreeModule", "GameplayStateTreeModule", "SmartObjectsModule", "Slate", "SlateCore",
+			"ProceduralMeshComponent"
 		});
 	}
 }
