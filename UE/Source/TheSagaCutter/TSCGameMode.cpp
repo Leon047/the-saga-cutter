@@ -33,6 +33,7 @@
 #include "TSCHUD.h"
 #include "TSCLoc.h"
 #include "TSCOcean.h"
+#include "TSCTerrain.h"
 #include "TSCPlayerController.h"
 #include "TSCPrimActor.h"
 #include "TheSagaCutter.h"
@@ -61,7 +62,6 @@ namespace
 	/** Curve parameter of the south shore end (the north end is its negative). */
 	float WallEndT() { return FMath::Acos(-FMath::Pow((WallEndX - WallCX) / WallA, WallN * 0.5f)); }
 
-	bool InRect(const FIntRect& R, int32 X, int32 Y) { return X >= R.Min.X && X < R.Max.X && Y >= R.Min.Y && Y < R.Max.Y; }
 	uint32 Hash2(int32 X, int32 Y) { return HashCombine(GetTypeHash(X * 73856093), GetTypeHash(Y * 19349663)); }
 	float Rand01(int32 X, int32 Y, int32 Salt = 0) { return (Hash2(X + Salt * 31, Y - Salt * 17) % 10000) / 10000.f; }
 
@@ -184,15 +184,6 @@ void ATSCGameMode::SetBlocked(int32 Cx, int32 Cy, bool bBlock)
 void ATSCGameMode::BlockRect(int32 Cx, int32 Cy, int32 W, int32 H, bool bBlock)
 {
 	for (int32 X = Cx; X < Cx + W; ++X) { for (int32 Y = Cy; Y < Cy + H; ++Y) { SetBlocked(X, Y, bBlock); } }
-}
-
-int32 ATSCGameMode::RegionOfCell(int32 Cx, int32 Cy) const
-{
-	if (InRect(ForestRect, Cx, Cy)) { return TSCRegion::Forest; }
-	if (InRect(GardenRect, Cx, Cy)) { return TSCRegion::Garden; }
-	if (InRect(GroveRect, Cx, Cy)) { return TSCRegion::Grove; }
-	if (InRect(DockRect, Cx, Cy)) { return TSCRegion::Dock; }
-	return TSCRegion::None;
 }
 
 FIntPoint ATSCGameMode::NearestFree(FIntPoint C) const
@@ -422,54 +413,28 @@ void ATSCGameMode::BuildWorld()
 {
 	Blocked.Init(0, GW * GH);
 
-	// ----- ground: big base tiles, then one tile per cell in the editable regions -----
+	// ----- continuous ground and trail network -----
 	{
-		ATSCPrimActor* Base = SpawnPrim(FVector(0.f, 0.f, -8.f));
-		// The base stops at the waterline (X = CellF(28).X): under the sea it would show through the wave troughs.
-		{
-			const float West = -45000.f, East = CellF(28.f, 12.f).X;
-			Base->AddPart(ETSCShape::Cube, FVector((West + East) * 0.5f, 0.f, 0.f), FRotator::ZeroRotator, FVector((East - West) / 100.f, 900.f, 0.02f), Pal::ForestFloor * 0.8f);
-		}
-		// settlement green
-		MeadowPart = Base->AddPart(ETSCShape::Cube, FVector(CellF(17.f, 12.f).X, 0.f, 3.f), FRotator::ZeroRotator, FVector(18.f * 2.f, 34.f * 2.f, 0.02f), Pal::Grass);
-		GroundBase = Base;
 		// The shore (a beach along a fractal waterline, X 1800 .. ShoreXAt(Y)) is built by the ocean.
 		Ocean =GetWorld()->SpawnActor<ATSCOcean>(ATSCOcean::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
 		Ocean->Build(CellF(28.f, 12.f).X, 0.f);
-
-		// trodden paths: gate -> hall -> dock, and to the stones
-		ATSCPrimActor* Paths = SpawnPrim(FVector(0.f, 0.f, 0.f));
-		auto PathCell = [&](int32 X, int32 Y)
-		{
-			Paths->AddPart(ETSCShape::Cube, CellCenter(X, Y) + FVector(0.f, 0.f, 1.f), FRotator::ZeroRotator, FVector(1.98f, 1.98f, 0.03f),
-				Pal::Dirt * (0.85f + 0.3f * Rand01(X, Y, 3)));
+		Terrain = GetWorld()->SpawnActor<ATSCTerrain>(ATSCTerrain::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
+		// Keep these routes in the same clearances as the original paths and through the gate opening.
+		const TArray<TArray<FVector2D>> TrailCells = {
+			{{-6, 12}, {1, 12.13}, {5, 11.89}, {8, 12}, {11.5, 12}, {12.9, 13.3}, {16.4, 13.5},
+			 {19.7, 13.35}, {20.9, 12.3}, {23.5, 12}, {26.3, 12}},
+			{{12.05, 12.5}, {13.5, 10.4}, {13.6, 6.8}, {13.7, 4.35}, {14.5, 3.6}, {16.1, 3.5}},
+			{{14.6, 13.4}, {14.4, 15.2}, {14.56, 17.6}, {14.5, 19.6}},
+			{{21.6, 14.65}, {21.45, 13.35}, {20.6, 11.8}, {20.5, 9.45}},
 		};
-		for (int32 X = 9; X <= 25; ++X) { if (X < 14 || X > 19) { PathCell(X, 11); PathCell(X, 12); } }
-		for (int32 X = 12; X <= 21; ++X) { PathCell(X, 13); }
-		for (int32 Y = 3; Y <= 9; ++Y) { PathCell(13, Y); }
-		PathCell(14, 3); PathCell(15, 3); PathCell(16, 3);
-		for (int32 Y = 14; Y <= 19; ++Y) { PathCell(14, Y); }
-		PathCell(20, 9); PathCell(20, 10); PathCell(21, 13); PathCell(21, 14);
-		ProDressing.Add(Paths);
-	}
-	for (int32 X = -6; X < GW + 2; ++X)
-	{
-		for (int32 Y = -4; Y < GH + 4; ++Y)
+		TArray<TArray<FVector2D>> TrailRoutes;
+		for (const TArray<FVector2D>& Cells : TrailCells)
 		{
-			const int32 Region = RegionOfCell(X, Y);
-			if (Region == TSCRegion::None) { continue; }
-			if (Region == TSCRegion::Dock && X >= 28) { continue; } // water
-			ATSCPrimActor* G = SpawnPrim(CellCenter(X, Y) + FVector(0.f, 0.f, 4.f), Region);
-			const float V = 0.8f + 0.4f * Rand01(X, Y, 1);
-			const bool bRoad = Region == TSCRegion::Forest && (Y == 11 || Y == 12);
-			FLinearColor Living = Region == TSCRegion::Forest ? (bRoad ? Pal::Dirt * 0.8f : Pal::ForestFloor) : Region == TSCRegion::Dock ? Pal::Shore
-				: Region == TSCRegion::Grove ? FLinearColor(0.04f, 0.085f, 0.055f) : Pal::Grass;
-			BuildGroundTile(G, Living * V, (Rand01(X, Y, 2) > 0.5f ? Pal::Ash : Pal::Char * 1.6f) * V);
-			G->Refresh();
-			if (Region == TSCRegion::Garden) { ProDressing.Add(G); }
+			TArray<FVector2D>& Route = TrailRoutes.AddDefaulted_GetRef();
+			for (const FVector2D& Cell : Cells) { Route.Add(FVector2D(CellF(Cell.X, Cell.Y))); }
 		}
+		Terrain->Build(Ocean, TrailRoutes);
 	}
-
 	// ----- palisade line (dense samples, north shore end to south shore end) -----
 	TArray<FVector> WallLine;
 	{
@@ -604,10 +569,12 @@ void ATSCGameMode::BuildWorld()
 	SetBlocked(TreeX, TreeY, true);
 
 	// ----- constructions -----
+	TArray<FBox2D> GroundExclusions;
 	auto Place = [&](int32 X, int32 Y, int32 W, int32 H, int32 Region = 0)
 	{
 		ATSCPrimActor* A = SpawnPrim(CellCorner(X, Y), Region);
 		BlockRect(X, Y, W, H);
+		GroundExclusions.Emplace(FVector2D(CellCorner(X, Y)), FVector2D(CellCorner(X + W, Y + H)));
 		A->bStepParts = true;  // lets the prologue raise it tile by tile; at full progress nothing changes
 		ProBuildings.Add(A);
 		return A;
@@ -711,6 +678,8 @@ void ATSCGameMode::BuildWorld()
 	Plots[1].Cell = FIntPoint(21, 18);
 	for (FTSCPlot& P : Plots)
 	{
+		GroundExclusions.Emplace(FVector2D(CellCorner(P.Cell.X, P.Cell.Y)),
+			FVector2D(CellCorner(P.Cell.X + 3, P.Cell.Y + 2)));
 		P.Marker = SpawnPrim(CellCorner(P.Cell.X, P.Cell.Y));
 		BuildPlotMarker(P.Marker, 3, 2);
 		P.Marker->Refresh();
@@ -719,6 +688,36 @@ void ATSCGameMode::BuildWorld()
 	Plots[0].bAvailable = true;
 	Plots[0].Marker->SetActorHiddenInGame(false);
 	ProDressing.Add(Plots[0].Marker);
+
+	GroundExclusions.Emplace(FVector2D(CellCorner(GardenRect.Min.X, GardenRect.Min.Y)),
+		FVector2D(CellCorner(GardenRect.Max.X, GardenRect.Max.Y)));
+	// The north and south log walls are placed in the level. Their clearances are
+	// also used by the framing trees above.
+	Terrain->BuildForestFloor(Ocean,
+		[&](const FVector2D& P, float Radius)
+		{
+			if (WallDist(FVector(P, 0.f)) < Radius + 95.f) { return false; }
+			const FIntPoint Min = WorldToCell(FVector(P - FVector2D(Radius), 0.f));
+			const FIntPoint Max = WorldToCell(FVector(P + FVector2D(Radius), 0.f));
+			for (int32 Y = Min.Y; Y <= Max.Y; ++Y)
+			{
+				for (int32 X = Min.X; X <= Max.X; ++X)
+				{
+					if (InGrid(X, Y) && IsBlocked(X, Y)) { return false; }
+					if (X >= GateX && X < WallEndX && (Y == -1 || Y == GH)) { return false; }
+				}
+			}
+			for (const FBox2D& Box : GroundExclusions)
+			{
+				if (Box.ComputeSquaredDistanceToPoint(P) < FMath::Square(Radius)) { return false; }
+			}
+			return true;
+		},
+		[](const FVector2D& P)
+		{
+			const float X = P.X / CELL + GW / 2;
+			return X < WallEndX && WallShape(X, P.Y / CELL + GH / 2) < 1.f;
+		});
 
 	// ----- people -----
 	Hunter = SpawnUnit(ETSCRole::Hunter, TEXT("Hakon the Hunter"), CellF(9.6f, 12.f));
@@ -846,6 +845,11 @@ void ATSCGameMode::SetCameraView(const FVector& Loc, float Arm)
 void ATSCGameMode::StartPrologue()
 {
 	bPrologue = true;
+	if (Terrain)
+	{
+		Terrain->SetTrailsVisible(false);
+		Terrain->SetClearingStumpsVisible(false);
+	}
 	ProTime = 0.f;
 	ProLanded = 0;
 	ProStage = 0;
@@ -867,8 +871,6 @@ void ATSCGameMode::StartPrologue()
 		T->SetActorHiddenInGame(false);
 	}
 	for (ATSCUnit* W : ProWatchers) { W->SetActorHiddenInGame(true); }
-	GroundBase->Parts[MeadowPart].LCol = Pal::ForestFloor * 0.8f;
-	GroundBase->Refresh();
 	for (int32 I = 0; I < NumHomeUnits && I < Units.Num(); ++I)
 	{
 		Units[I]->Teleport(ShipMooring);
@@ -884,6 +886,11 @@ void ATSCGameMode::EndPrologue()
 {
 	if (!bPrologue) { return; }
 	bPrologue = false;
+	if (Terrain)
+	{
+		Terrain->SetTrailsVisible(true);
+		Terrain->SetClearingStumpsVisible(true);
+	}
 	ProFade = 0.f;
 	ProDusk = 0.f;
 	ProCaptionAlpha = 0.f;
@@ -899,8 +906,6 @@ void ATSCGameMode::EndPrologue()
 	for (ATSCPrimActor* B : ProBuildings) { B->SetBuildProgress(1.f); }
 	for (ATSCPrimActor* T : ProTrees) { T->SetActorHiddenInGame(true); }
 	for (ATSCUnit* W : ProWatchers) { W->SetActorHiddenInGame(true); }
-	GroundBase->Parts[MeadowPart].LCol = Pal::Grass;
-	GroundBase->Refresh();
 	ResetVillagers();
 	++GridVersion;  // everyone plans a fresh path from home
 	SetCameraView(CellF(17.f, 12.f), DefaultCamArm);
@@ -911,6 +916,11 @@ void ATSCGameMode::SimPrologue(float Dt)
 {
 	ProTime += Dt;
 	const float T = ProTime;
+	if (Terrain && T >= ProTClear + 1.5f)
+	{
+		Terrain->SetTrailsVisible(true);
+		Terrain->SetClearingStumpsVisible(true);
+	}
 	if (T >= ProTEnd)
 	{
 		StartPrologue();
@@ -997,11 +1007,6 @@ void ATSCGameMode::SimPrologue(float Dt)
 		{
 			Tree->SetActorHiddenInGame(true);
 		}
-	}
-	{
-		const float A = FMath::SmoothStep(ProTLand + 3.f, ProTClear + 1.f, T);
-		GroundBase->Parts[MeadowPart].LCol = FMath::Lerp(Pal::ForestFloor * 0.8f, Pal::Grass, A);
-		GroundBase->Refresh();
 	}
 
 	// ----- the wall goes up from the gate outwards, then the houses and everything in them -----
@@ -1124,7 +1129,6 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 			for (int32 I = 0; I < Units.Num(); ++I) { if (Units[I]) { Units[I]->Sim(Dt); } }
 		}
 	}
-	if (Ocean)
 	{
 		FTSCOceanInput In;
 		In.Time = WorldTime;
@@ -1145,10 +1149,17 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 			In.SunColor = Sun->GetLightColor();
 			In.SunIntensity = Sun->Intensity;
 		}
-		Ocean->Sim(RealDt, In);
+		In.MeadowColor = Pal::ForestFloor;
+		if (Ocean) { Ocean->Sim(RealDt, In); }
+		if (Terrain) { Terrain->Sim(RealDt, In, AshAmount); }
 	}
 	UpdateAtmosphere(RealDt);
 	if (bAuto) { AutoPlay(RealDt); }
+}
+
+float ATSCGameMode::GroundReliefAt(const FVector& P) const
+{
+	return Terrain ? Terrain->GroundRelief(FVector2D(P)) : 0.f;
 }
 
 float ATSCGameMode::WadeDepthAt(const FVector& P) const
@@ -1946,6 +1957,14 @@ void ATSCGameMode::TransitionRegion(int32 Region, const FVector& Origin)
 		{
 			P->StartSagaTransition(1.f, FMath::Min(FVector::Dist2D(P->GetActorLocation(), Origin) / 2400.f, 2.4f));
 		}
+	}
+	if (Terrain && Region >= TSCRegion::Forest && Region <= TSCRegion::Grove)
+	{
+		const FIntRect& Cells = Region == TSCRegion::Forest ? ForestRect
+			: Region == TSCRegion::Garden ? GardenRect : GroveRect;
+		Terrain->StartGroundTransition(Region,
+			FBox2D(FVector2D(CellCorner(Cells.Min.X, Cells.Min.Y)), FVector2D(CellCorner(Cells.Max.X, Cells.Max.Y))),
+			FVector2D(Origin));
 	}
 	SpawnEmbers(Region, 60);
 	TransitionTimer = 3.4f;

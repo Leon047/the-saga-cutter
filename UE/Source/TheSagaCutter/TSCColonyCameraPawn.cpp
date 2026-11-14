@@ -94,7 +94,7 @@ void ATSCColonyCameraPawn::Tick(float DeltaSeconds)
 	// Keep the camera over the clearing.
 	FVector Loc = GetActorLocation();
 	Loc.X = FMath::Clamp(Loc.X, -3600.f, 3600.f);
-	Loc.Y = FMath::Clamp(Loc.Y, -2800.f, 2800.f);
+	Loc.Y = FMath::Clamp(Loc.Y, -3200.f, 3400.f);
 	SetActorLocation(Loc);
 
 	// Zoom (smoothed)

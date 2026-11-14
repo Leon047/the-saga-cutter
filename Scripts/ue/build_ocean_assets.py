@@ -1,8 +1,7 @@
 # The Saga Cutter - game jam project.
-# Builds the stylized ocean assets in the running editor (idempotent: re-imports the texture, deletes and recreates
-# the material). Run inside the editor:  exec(open(r"<repo>/Scripts/ue/build_ocean_assets.py").read())
+# Builds or updates the stylized ocean assets. Run inside the editor:  exec(open(r"<repo>/Scripts/ue/build_ocean_assets.py").read())
 #   /Game/Vikings/Environment/Ocean/T_OceanPatterns  <- Docs/Art/Ocean/T_OceanPatterns.png (linear, masks)
-#   /Game/Vikings/Environment/Ocean/M_SagaOcean      opaque Default Lit, waves = the table in TSCOcean.cpp
+#   /Game/Vikings/Environment/Ocean/M_SagaOcean      masked Default Lit, waves = the table in TSCOcean.cpp
 # Parameters marked * are overridden by ATSCOcean every tick / at build; the rest are look defaults.
 import math
 import os
@@ -44,27 +43,29 @@ SHORE_BIAS, SHORE_MIN, SHORE_MAX = 60.0, -60.0, 180.0
 # Lapping bands, same as LapRate / LapLength in TSCOcean.cpp (the surf volume swells in time with them).
 LAP_RATE, LAP_LENGTH = 0.11, 460.0
 
-# --- 1. Texture ---
-task = unreal.AssetImportTask()
-task.filename = PNG
-task.destination_path = FOLDER
-task.destination_name = "T_OceanPatterns"
-task.automated = True
-task.replace_existing = True
-task.save = False
-unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
-tex = unreal.EditorAssetLibrary.load_asset(TEX_PATH)
+# Reuse the pattern texture on material-only updates.
+tex = unreal.EditorAssetLibrary.load_asset(TEX_PATH) if unreal.EditorAssetLibrary.does_asset_exist(TEX_PATH) else None
 if not tex:
-    raise RuntimeError("[ocean] texture import failed: " + PNG)
-tex.set_editor_property("srgb", False)
-tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
-unreal.EditorAssetLibrary.save_asset(TEX_PATH, only_if_is_dirty=False)
+    task = unreal.AssetImportTask()
+    task.filename = PNG
+    task.destination_path = FOLDER
+    task.destination_name = "T_OceanPatterns"
+    task.automated = True
+    task.save = False
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    tex = unreal.EditorAssetLibrary.load_asset(TEX_PATH)
+    if not tex:
+        raise RuntimeError("[ocean] texture import failed: " + PNG)
+    tex.set_editor_property("srgb", False)
+    tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
+    unreal.EditorAssetLibrary.save_asset(TEX_PATH, only_if_is_dirty=False)
 
-# --- 2. Material (delete and recreate) ---
-if unreal.EditorAssetLibrary.does_asset_exist(MAT_PATH):
-    unreal.EditorAssetLibrary.delete_asset(MAT_PATH)
-mat = unreal.AssetToolsHelpers.get_asset_tools().create_asset(MAT_NAME, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
-mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_OPAQUE)
+mat = unreal.EditorAssetLibrary.load_asset(MAT_PATH) if unreal.EditorAssetLibrary.does_asset_exist(MAT_PATH) else None
+if mat:
+    unreal.MaterialEditingLibrary.delete_all_material_expressions(mat)
+else:
+    mat = unreal.AssetToolsHelpers.get_asset_tools().create_asset(MAT_NAME, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
+mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
 mat.set_editor_property("tangent_space_normal", False)
 mat.set_editor_property("two_sided", False)
@@ -237,7 +238,9 @@ wp.set_editor_property("world_position_shader_offset", unreal.WorldPositionInclu
 P = mask(wp, "rg")
 Px = mask(wp, "r")
 Py = mask(wp, "g")
-vcol_r = mask(add("VertexColor"), "r")
+vertex = add("VertexColor")
+vcol_r = mask(vertex, "r")
+river_opening = mask(vertex, "g")
 
 # 1. Waves: H = sum A sin(ph), G = sum A K cos(ph) Dir
 H = None
@@ -262,7 +265,9 @@ s_range = sub(p_smax, p_smin)
 s_pad = mul(s_range, 0.25)
 Sy = plus(p_smin, mul(s_range, smoothstep(sub(p_smin, s_pad), plus(p_smax, s_pad), s_raw)))
 d = sub(sub(Px, p_shore), Sy)  # distance out to sea from the fractal waterline
-atten = mul(lerp(0.15, 1.0, smoothstep(0.0, 1600.0, d)), vcol_r)
+beach = sub(1.0, smoothstep(0.06, 0.97, river_opening))
+atten = mul(mul(lerp(0.15, 1.0, smoothstep(0.0, 1600.0, d)), vcol_r),
+            lerp(1.0, smoothstep(-12.0, 65.0, d), beach))
 HA = mul(H, atten)
 GA = mul(G, atten)
 MEL.connect_material_property(append(const2(0.0, 0.0), HA), "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
@@ -272,6 +277,8 @@ MEL.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
 # 2. Depth colour, lighter crests
 depth = power(sat(div(d, 2600.0)), 0.6)
 water = plus(lerp(p_shallow, p_deep, depth), mul(mul(p_shallow, 0.25), sat(div(HA, 14.0))))
+plume = mul(smoothstep(0.03, 0.86, river_opening), sub(1.0, smoothstep(-30.0, 1320.0, d)))
+water = lerp(water, vector("RiverPlumeTint", (0.027, 0.105, 0.076)), plume)
 
 # 3. Foam net: two panned layers, each UV distorted by the G channel of a first lookup
 uv0 = div(P, p_fscale)
@@ -287,17 +294,30 @@ def foam_layer(scale, pan):
 
 G1, R1, B1 = foam_layer(1.0, (0.012, 0.004))
 G2, R2, B2 = foam_layer(1.37, (-0.007, 0.010))
+# Break up the feather through the outlet with the existing water pattern.
+# The mask stays fully opaque across the rest of the ocean.
+feather = mask(vertex, "b")
+coverage = sub(1.0, smoothstep(0.0, 1.0, plus(feather, mul(mul(feather, sub(1.0, feather)), sub(G1, 0.5)))))
+# Clip the ocean apron where it reaches inland under the beach. The river opening keeps its own fade.
+coverage = mul(coverage, lerp(1.0, smoothstep(-38.0, -12.0, d), beach))
+dither = add("MaterialFunctionCall")
+dither.set_material_function(unreal.load_asset(
+    "/Engine/Functions/Engine_MaterialFunctions02/Utility/DitherTemporalAA"))
+link(coverage, dither, "Alpha Threshold")
+MEL.connect_material_property(dither, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+
 # S8: sparser, softer net that lives on the crests (was smoothstep(0.55, 0.75) * (0.25 + 0.75 * crest), read as cracked ice)
 net = smoothstep(0.66, 0.9, mul(mul(R1, R2), 2.0))
 foam_open = mul(net, plus(0.05, mul(0.65, sat(div(sub(HA, 3.0), 8.0)))))
 
 # 4. Shore: lapping bands travelling in, and the edge line
-dn = plus(d, mul(sub(G1, 0.5), 260.0))
-# S8: thinner bands (was smoothstep(0.80, 0.90), fade 1300) and a thin lively edge line (was 40..110+-40 on dn)
-lap = mul(mul(smoothstep(0.86, 0.92, frac(plus(div(dn, p_lap_len), mul(p_time, p_lap_rate)))), sat(sub(1.0, div(dn, 1100.0)))), 0.85)
-dne = plus(d, mul(sub(G1, 0.5), 70.0))
-edge_hi = plus(34.0, mul(16.0, sin(plus(mul(p_time, 0.9), div(Py, 300.0)))))
-edge = sub(1.0, smoothstep(8.0, edge_hi, dne))
+dn = plus(d, mul(sub(G1, 0.5), 85.0))
+phase = frac(plus(div(dn, p_lap_len), mul(p_time, p_lap_rate)))
+lap = mul(smoothstep(0.77, 0.87, phase), sub(1.0, smoothstep(0.87, 0.97, phase)))
+lap = mul(mul(lap, sub(1.0, smoothstep(170.0, 680.0, d))), lerp(0.12, 0.46, G2))
+dne = plus(d, mul(sub(G1, 0.5), 28.0))
+edge_hi = plus(27.0, mul(8.0, sin(plus(mul(p_time, 0.9), div(Py, 300.0)))))
+edge = mul(sub(1.0, smoothstep(3.0, edge_hi, dne)), lerp(0.38, 0.76, G2))
 
 # 5. Boat rings
 rings = []
@@ -308,7 +328,8 @@ for f in p_foam:
     rings.append(ring)
 
 # 6. Combine
-foam = sat(plus(plus(plus(plus(foam_open, lap), edge), rings[0]), rings[1]))
+shore_foam = mul(mul(maxn(lap, edge), smoothstep(-8.0, 8.0, d)), beach)
+foam = sat(plus(plus(plus(foam_open, shore_foam), rings[0]), rings[1]))
 base = lerp(lerp(water, p_adeep, mul(p_ash, 0.85)), lerp(p_cfoam, p_afoam, p_ash), foam)
 MEL.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
 MEL.connect_material_property(lerp(ROUGH_WATER, ROUGH_FOAM, foam), "", unreal.MaterialProperty.MP_ROUGHNESS)
@@ -320,8 +341,9 @@ MEL.connect_material_property(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_
 
 MEL.layout_material_expressions(mat)
 MEL.recompile_material(mat)
-unreal.EditorAssetLibrary.save_asset(MAT_PATH, only_if_is_dirty=False)
 errs = MEL.get_material_error_expressions(mat)
+if errs or not unreal.EditorAssetLibrary.save_asset(MAT_PATH, only_if_is_dirty=False):
+    raise RuntimeError("[ocean] could not compile and save " + MAT_PATH)
 summary = "[ocean] material built, %d expressions%s" % (
     MEL.get_num_material_expressions(mat), "" if not errs else ", %d ERROR expressions" % len(errs))
 print(summary)

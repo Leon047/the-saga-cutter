@@ -20,6 +20,7 @@ struct FTSCOceanInput
 	FVector Focus = FVector::ZeroVector;  // camera focus point on the ground
 	float Zoom01 = 0.5f;              // 0 = zoomed in, 1 = zoomed out
 	FLinearColor SunColor = FLinearColor::White;
+	FLinearColor MeadowColor = FLinearColor(0.055f, 0.095f, 0.05f);
 	float SunIntensity = 1.f;
 };
 
@@ -49,6 +50,8 @@ class ATSCOcean : public AActor
 public:
 	ATSCOcean();
 	/** Builds the grid mesh and the material instance. ShoreX = world X of the waterline, SurfaceZ = rest level. */
+	void HideBeachApron();
+	float BeachHeightAt(const FVector2D& P) const;
 	void Build(float InShoreX, float InSurfaceZ);
 	/** Pushes parameters, steps every floater, mixes the audio. Call once per tick after the game moved its boats. */
 	void Sim(float Dt, const FTSCOceanInput& In);
@@ -62,6 +65,7 @@ public:
 	void PlayLanding(const FVector2D& At, float Volume = 1.f);
 	/** A burst of droplets at the surface. Strength ~0.3 (footstep) .. 2 (boat landing). Dir biases the throw (may be zero). */
 	void Splash(const FVector2D& At, float Strength, const FVector2D& Dir = FVector2D::ZeroVector);
+	void RiverSplash(const FVector& At, const FVector2D& Downstream, FRandomStream& Random);
 	/** Footstep in the shallows: small splash plus a rate-limited wade sound. */
 	void WadeStep(const FVector2D& At, const FVector2D& MoveDir);
 
@@ -72,10 +76,15 @@ private:
 	FVector2D SlopeAt(const FVector2D& P) const;
 	/** The beach along the fractal waterline (replaces the old straight shore strip): dry flat top and a wet slope into the water. */
 	void BuildBeach();
+	void BuildShorePlants();
 
 	UPROPERTY() TObjectPtr<UProceduralMeshComponent> Mesh;
 	UPROPERTY() TObjectPtr<UProceduralMeshComponent> Beach;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> BeachCobbles;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> MID;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> BeachMID;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ShoreGrassMID;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ShoreFernMID;
 	UPROPERTY() TObjectPtr<UAudioComponent> Surf;
 	UPROPERTY() TObjectPtr<USoundBase> SurfLoop;
 	UPROPERTY() TArray<TObjectPtr<USoundBase>> Gulls;
@@ -83,7 +92,7 @@ private:
 	UPROPERTY() TObjectPtr<USoundBase> Landing;
 	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> Drops;
 	UPROPERTY() TArray<TObjectPtr<USoundBase>> Wades;
-	struct FDrop { FVector Pos; FVector Vel; float Life; float Size; };
+	struct FDrop { FVector Pos; FVector Vel; float Life; float Size; float RiverSurface = -BIG_NUMBER; };
 	TArray<FDrop> DropSim;  // at most MaxDrops
 	TArray<FTSCFloater> Floaters;
 	float ShoreX = 0.f, SurfaceZ = 0.f, Time = 0.f;

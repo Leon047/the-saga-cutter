@@ -9,6 +9,7 @@
 class UStaticMesh;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UPointLightComponent;
 
 enum class ETSCShape : uint8 { Cube, Sphere, Cylinder, Cone, Plane };
@@ -60,6 +61,8 @@ public:
 		USceneComponent* Parent = nullptr);
 	/** An imported static mesh with its own materials (no flat colour, so SetAshen/SetGlow have no effect). */
 	int32 AddMeshPart(UStaticMesh* Mesh, const FVector& Loc, const FRotator& Rot, const FVector& Scale, USceneComponent* Parent = nullptr);
+	/** Uses Saga Color and Emissive parameters on the given material, or the default flat material. */
+	void SetPartMaterial(int32 Idx, UMaterialInterface* Material = nullptr);
 	USceneComponent* AddPivot(const FVector& Loc, USceneComponent* Parent = nullptr);
 	void AddLight(const FVector& Loc, const FLinearColor& Col, float LivingIntensity, float AshenIntensity, float Radius);
 

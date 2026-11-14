@@ -10,6 +10,7 @@
 
 class ATSCPrimActor;
 class ATSCOcean;
+class ATSCTerrain;
 class UAudioComponent;
 class USoundBase;
 class UDirectionalLightComponent;
@@ -203,7 +204,9 @@ public:
 	void OnUnitDied(ATSCUnit* U);
 	void Toast(const FString& Text);
 	/** Visual only: how deep a unit standing at P is in the shallows (0 on land and on standing dock planks). */
+	float GroundReliefAt(const FVector& P) const;
 	float WadeDepthAt(const FVector& P) const;
+
 	/** A footstep in the shallows at P moving along Dir. */
 	void WadeStep(const FVector& P, const FVector& Dir);
 
@@ -240,7 +243,6 @@ private:
 	FIntPoint WorldToCell(const FVector& P) const;
 	FIntPoint NearestFree(FIntPoint C) const;
 	bool LineFree(const FVector& A, const FVector& B) const;
-	int32 RegionOfCell(int32 Cx, int32 Cy) const;
 
 	// flow
 	void SimDay(float Dt);
@@ -286,8 +288,6 @@ private:
 
 	UPROPERTY() TObjectPtr<ATSCPrimActor> Longship;
 	FVector ShipMooring = FVector::ZeroVector;
-	UPROPERTY() TObjectPtr<ATSCPrimActor> GroundBase;
-	int32 MeadowPart = -1;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> WallSegs;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProBuildings;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProDressing;
@@ -321,6 +321,7 @@ private:
 	TArray<int32> CrateParts;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> RaiderBoat;
 	UPROPERTY() TObjectPtr<ATSCOcean> Ocean;
+	UPROPERTY() TObjectPtr<ATSCTerrain> Terrain;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> Flotsam;
 	bool bProLandingPlayed = false;
 	UPROPERTY() TObjectPtr<ATSCPrimActor> HammerStone;

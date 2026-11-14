@@ -41,8 +41,8 @@ namespace
 	/** Height of the figure in cm (named heroes are 12% taller), same as the old primitive figure. */
 	constexpr float VikingHeight = 120.f;
 	// Weapon meshes (Content/Weapons). Several candidates where the folder name may still change:
-	// the axe folder was created with a Cyrillic "А" (U+0410), the arrow folder is spelt "Errow".
-	const TCHAR* const WeaponAxe[] = { TEXT("/Game/Weapons/Axe/Axe_small.Axe_small"), TEXT("/Game/Weapons/Аxe/Axe_small.Axe_small") };
+	// the axe folder was created with a Cyrillic "Рђ" (U+0410), the arrow folder is spelt "Errow".
+	const TCHAR* const WeaponAxe[] = { TEXT("/Game/Weapons/Axe/Axe_small.Axe_small"), TEXT("/Game/Weapons/Рђxe/Axe_small.Axe_small") };
 	const TCHAR* const WeaponSword[] = { TEXT("/Game/Weapons/Sword/Sword.Sword") };
 	const TCHAR* const WeaponShield[] = { TEXT("/Game/Weapons/Shield/Shield_Round.Shield_Round") };
 	const TCHAR* const WeaponBow[] = { TEXT("/Game/Weapons/Bow/Bow_Wooden.Bow_Wooden") };
@@ -554,7 +554,7 @@ void ATSCUnit::OrderAssault()
 
 void ATSCUnit::Teleport(const FVector& Pos)
 {
-	SetActorLocation(FVector(Pos.X, Pos.Y, GM ? -GM->WadeDepthAt(FVector(Pos.X, Pos.Y, 0.f)) : 0.f));
+	SetActorLocation(FVector(Pos.X, Pos.Y, GM ? GM->GroundReliefAt(Pos) - GM->WadeDepthAt(FVector(Pos.X, Pos.Y, 0.f)) : 0.f));
 	LastWadePos = GetActorLocation();
 	Path.Reset();
 }
@@ -570,7 +570,7 @@ void ATSCUnit::UpdateWading(float Dt)
 	if (!GM || bGone || bSheltered || IsHidden()) { return; }
 	const FVector Loc = GetActorLocation();
 	const float Depth = GM->WadeDepthAt(Loc);
-	const float NewZ = FMath::FInterpTo(Loc.Z, -Depth, Dt, 8.f);
+	const float NewZ = FMath::FInterpTo(Loc.Z, GM->GroundReliefAt(Loc) - Depth, Dt, 8.f);
 	if (!FMath::IsNearlyEqual(NewZ, Loc.Z, 0.01f))
 	{
 		SetActorLocation(FVector(Loc.X, Loc.Y, NewZ));
