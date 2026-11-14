@@ -203,6 +203,10 @@ private:
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> MeshMIDs;
 	TArray<FLinearColor> MeshCols;
 	int32 TunicSlot = -1;
+	/** Hand bones and weapon size factor of the model in use (weapon fallback bone, see AddWeapon). */
+	FName HandR;
+	FName HandL;
+	float WeaponScale = 1.f;
 	/** While > 0 a one-shot clip (attack, hit, work) plays and locomotion does not override it. */
 	float OneShotTimer = 0.f;
 	float DiagT = 0.f; // TEMP DIAG (remove)

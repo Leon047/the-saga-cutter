@@ -23,11 +23,24 @@ namespace
 		const TCHAR* Folder;
 		const TCHAR* Mesh;
 		const TCHAR* AnimPrefix;
+		/** Hand bones (weapon fallback when a socket is missing) and a multiplier on the weapon size. */
+		const TCHAR* HandR;
+		const TCHAR* HandL;
+		float WeaponScale;
+		/** Tripo axolotl model: random size / tint only for unnamed copies. */
+		bool bAxolotl;
 	};
-	const FVikingModel VikingMale{ TEXT("/Game/Characters/viking_male"), TEXT("Viking_Male"), TEXT("Viking_MaleCharacterArmature_") };
-	const FVikingModel VikingFemale{ TEXT("/Game/Characters/viking_female"), TEXT("Viking_Female"), TEXT("Viking_FemaleCharacterArmature_") };
+	const FVikingModel VikingMale{ TEXT("/Game/Characters/viking_male"), TEXT("Viking_Male"), TEXT("Viking_MaleCharacterArmature_"), TEXT("Fist_R"), TEXT("Fist_L"), 1.f, false };
+	const FVikingModel VikingFemale{ TEXT("/Game/Characters/viking_female"), TEXT("Viking_Female"), TEXT("Viking_FemaleCharacterArmature_"), TEXT("Fist_R"), TEXT("Fist_L"), 1.f, false };
 	/** The one lord (Torvald Shield-Bearer): horned helmet. */
-	const FVikingModel VikingLord{ TEXT("/Game/Characters/viking_lord"), TEXT("VikingHelmet"), TEXT("VikingHelmetCharacterArmature_") };
+	const FVikingModel VikingLord{ TEXT("/Game/Characters/viking_lord"), TEXT("VikingHelmet"), TEXT("VikingHelmetCharacterArmature_"), TEXT("Fist_R"), TEXT("Fist_L"), 1.f, false };
+	/** The unnamed villager (Tripo axolotl warrior). Optional: if its mesh is missing the Viking models are used. */
+	const FVikingModel AxolotlWarrior{ TEXT("/Game/Characters/axolotl_warrior"), TEXT("Axolotl_Warrior"), TEXT("Axolotl_WarriorCharacterArmature_"), TEXT("RightHand"), TEXT("LeftHand"), 1.f, true };
+	/** The four named heroes (Tripo axolotls), each optional: a missing mesh falls back to the Viking models. */
+	const FVikingModel AxolotlArcher{ TEXT("/Game/Characters/axolotl_archer"), TEXT("Axolotl_Archer"), TEXT("Axolotl_ArcherCharacterArmature_"), TEXT("RightHand"), TEXT("LeftHand"), 1.f, true };
+	const FVikingModel AxolotlDruid{ TEXT("/Game/Characters/axolotl_druid"), TEXT("Axolotl_Druid"), TEXT("Axolotl_DruidCharacterArmature_"), TEXT("RightHand"), TEXT("LeftHand"), 1.f, true };
+	const FVikingModel AxolotlBlacksmith{ TEXT("/Game/Characters/axolotl_blacksmith"), TEXT("Axolotl_Blacksmith"), TEXT("Axolotl_BlacksmithCharacterArmature_"), TEXT("RightHand"), TEXT("LeftHand"), 1.f, true };
+	const FVikingModel AxolotlJarl{ TEXT("/Game/Characters/axolotl_jarl"), TEXT("Axolotl_Jarl"), TEXT("Axolotl_JarlCharacterArmature_"), TEXT("RightHand"), TEXT("LeftHand"), 1.f, true };
 
 	const TCHAR* VikingAnimNames[] = { TEXT("Idle"), TEXT("Walk"), TEXT("Run"), TEXT("Walk_Carry"), TEXT("Run_Carry"),
 		TEXT("SwordSlash"), TEXT("Shoot_OneHanded"), TEXT("Punch"), TEXT("PickUp"), TEXT("RecieveHit"), TEXT("Death") };
@@ -35,6 +48,14 @@ namespace
 
 	/** Colour parameter of the imported FBX materials. */
 	const FName DiffuseParam(TEXT("DiffuseColor"));
+
+	/** The MID's DiffuseColor, or white if the material has no such parameter (K2_GetVectorParameterValue would give black). */
+	FLinearColor DiffuseOrWhite(UMaterialInstanceDynamic* MID)
+	{
+		FLinearColor Col = FLinearColor::White;
+		if (!MID || !MID->GetVectorParameterValue(FHashedMaterialParameterInfo(DiffuseParam), Col)) { return FLinearColor::White; }
+		return Col;
+	}
 
 	// Tuning: the FBX faces +Y, units walk along +X.
 	constexpr float VikingYaw = -90.f;
@@ -293,22 +314,54 @@ void ATSCUnit::BuildFigure()
 
 bool ATSCUnit::BuildViking(const FLinearColor& Tunic)
 {
-	// Torvald (the named shield-bearer) is the lord. Named heroes have a fixed sex (Sigrun the Healer is a woman),
-	// everyone else (workers, raiders) is a man or a woman at random.
+	// Axolotl models (Tripo) are preferred when their assets exist: unnamed workers are the warrior, the four named heroes
+	// have their own class model (archer, druid, blacksmith, jarl). Raiders and anything else stay Vikings. Fallback when the
+	// axolotl mesh is missing: Torvald (the named shield-bearer) is the lord; named heroes have a fixed sex (Sigrun the Healer
+	// is a woman); everyone else (workers, raiders) is a man or a woman at random.
+	auto LoadMesh = [](const FVikingModel& M) -> USkeletalMesh*
+	{
+		const FString Path = FString::Printf(TEXT("%s/%s.%s"), M.Folder, M.Mesh, M.Mesh);
+		if (USkeletalMesh* SK = FindObject<USkeletalMesh>(nullptr, *Path)) { return SK; }
+		// Quiet: a missing optional model must not log a load warning on every spawn.
+		if (!FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Path))) { return nullptr; }
+		return LoadObject<USkeletalMesh>(nullptr, *Path);
+	};
 	const FVikingModel* Model = &VikingMale;
+	USkeletalMesh* SkMesh = nullptr;
+	const FVikingModel* Preferred = nullptr;
 	if (bNamed)
 	{
-		Model = Role == ETSCRole::Shield ? &VikingLord : Role == ETSCRole::Healer ? &VikingFemale : &VikingMale;
+		switch (Role)
+		{
+		case ETSCRole::Hunter: Preferred = &AxolotlArcher; break;
+		case ETSCRole::Healer: Preferred = &AxolotlDruid; break;
+		case ETSCRole::Woodcutter: Preferred = &AxolotlBlacksmith; break;
+		case ETSCRole::Shield: Preferred = &AxolotlJarl; break;
+		default: break;
+		}
 	}
-	else if (FMath::RandBool())
+	else if (Role == ETSCRole::Worker)
 	{
-		Model = &VikingFemale;
+		Preferred = &AxolotlWarrior;
 	}
-	auto LoadMesh = [](const FVikingModel& M)
+	if (Preferred)
 	{
-		return LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), M.Folder, M.Mesh, M.Mesh));
-	};
-	USkeletalMesh* SkMesh = LoadMesh(*Model);
+		SkMesh = LoadMesh(*Preferred);
+		if (SkMesh) { Model = Preferred; }
+	}
+	if (!SkMesh)
+	{
+		if (bNamed)
+		{
+			Model = Role == ETSCRole::Shield ? &VikingLord : Role == ETSCRole::Healer ? &VikingFemale : &VikingMale;
+		}
+		else if (FMath::RandBool())
+		{
+			Model = &VikingFemale;
+		}
+		SkMesh = LoadMesh(*Model);
+	}
+	const bool bAxolotl = Model->bAxolotl;
 	if (!SkMesh && Model != &VikingMale)
 	{
 		Model = &VikingMale;
@@ -321,7 +374,11 @@ bool ATSCUnit::BuildViking(const FLinearColor& Tunic)
 
 	// Fit the imported mesh to the figure height, feet on the ground.
 	const FBox Box = SkMesh->GetImportedBounds().GetBox();
-	const float Scale = VikingHeight * S / FMath::Max(Box.Max.Z - Box.Min.Z, 1.f);
+	// The axolotl copies share one texture: vary size a little (and tint below).
+	const float Scale = VikingHeight * S * (bAxolotl && !bNamed ? FMath::FRandRange(0.94f, 1.06f) : 1.f) / FMath::Max(Box.Max.Z - Box.Min.Z, 1.f);
+	HandR = Model->HandR;
+	HandL = Model->HandL;
+	WeaponScale = Model->WeaponScale;
 
 	Mesh = NewObject<USkeletalMeshComponent>(this);
 	Mesh->SetMobility(EComponentMobility::Movable);
@@ -342,7 +399,8 @@ bool ATSCUnit::BuildViking(const FLinearColor& Tunic)
 		const UMaterialInterface* Src = Mesh->GetMaterial(I);
 		const FString SlotName = Src ? Src->GetName() : FString();
 		UMaterialInstanceDynamic* MID = Mesh->CreateDynamicMaterialInstance(I);
-		FLinearColor Col = MID ? MID->K2_GetVectorParameterValue(DiffuseParam) : FLinearColor::White;
+		FLinearColor Col = DiffuseOrWhite(MID);
+		if (bAxolotl && !bNamed) { Col = FLinearColor(FMath::FRandRange(0.85f, 1.f), FMath::FRandRange(0.85f, 1.f), FMath::FRandRange(0.85f, 1.f)); }
 		if (SlotName == TEXT("Main")) { TunicSlot = I; Col = Tunic; }
 		else if (bRaider && SlotName == TEXT("Hair")) { Col = FLinearColor(0.05f, 0.04f, 0.03f); }
 		MeshMIDs.Add(MID);
@@ -629,7 +687,9 @@ UStaticMeshComponent* ATSCUnit::AddWeapon(const FTSCWeaponDef& Def, bool bArmedO
 {
 	UStaticMesh* SM = LoadFirstMesh(Def.Paths);
 	if (!SM || !Mesh) { return nullptr; }
-	const FName Socket = Mesh->DoesSocketExist(Def.Socket) ? Def.Socket : Def.FallbackBone;
+	// Fallback bone: the model's own hand bone (Def names the Viking Fist_R / Fist_L).
+	const FName Hand = Def.FallbackBone == FName(TEXT("Fist_L")) ? HandL : HandR;
+	const FName Socket = Mesh->DoesSocketExist(Def.Socket) ? Def.Socket : (Hand.IsNone() ? Def.FallbackBone : Hand);
 
 	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this);
 	Comp->SetMobility(EComponentMobility::Movable);
@@ -644,7 +704,7 @@ UStaticMeshComponent* ATSCUnit::AddWeapon(const FTSCWeaponDef& Def, bool bArmedO
 	// Orient by the socket convention, size it against the figure, and put the grip point on the socket.
 	// The skeleton bones carry a x100 scale, so sizes are set in world space, offsets divided by the socket scale.
 	const float MeshLen = FMath::Max(SM->GetBoundingBox().GetSize().GetMax(), KINDA_SMALL_NUMBER);
-	const float WorldScale = Def.Size * VikingHeight * (bNamed ? 1.12f : 1.f) / MeshLen;
+	const float WorldScale = Def.Size * VikingHeight * (bNamed ? 1.12f : 1.f) * WeaponScale / MeshLen;
 	const float SocketScale = FMath::Max(Mesh->GetSocketTransform(Socket, RTS_World).GetScale3D().GetMax(), KINDA_SMALL_NUMBER);
 	const FQuat Rot = AxesToXZ(Def.LocalX, Def.LocalZ);
 	Comp->SetRelativeRotation(Rot);
@@ -670,7 +730,7 @@ void ATSCUnit::AddTintedMaterials(UMeshComponent* Comp)
 	{
 		UMaterialInstanceDynamic* MID = Comp->CreateDynamicMaterialInstance(I);
 		MeshMIDs.Add(MID);
-		MeshCols.Add(MID ? MID->K2_GetVectorParameterValue(DiffuseParam) : FLinearColor::White);
+		MeshCols.Add(DiffuseOrWhite(MID));
 	}
 }
 

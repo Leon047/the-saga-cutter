@@ -2,6 +2,14 @@
 
 ## Asset packs
 
+Add one entry per third-party pack used in the project. Include the pack name, creator, source link, where it’s used, and the license that applied when you acquired it. If the pack includes a license or attribution file, add it to `Docs/` and link it from the entry. If you still need to verify the source or license, record it under [Provenance to confirm](#provenance-to-confirm).
+
+Example entry (replace the placeholders)
+
+```markdown
+- [Pack name](SOURCE_URL) by Creator. Used for shoreline props in `Map_Saga`. [License name and version](LICENSE_URL_OR_FILE).
+```
+
 - [Ultra Dynamic Sky](https://www.fab.com/listings/84fda27a-c79f-49c9-8458-82401fb37cfb) by Everett Gunther. Sky and lighting in `Map_Saga`.
 
 The Megascans assets were imported at the medium quality tier. The game applies its own palette.
@@ -17,7 +25,7 @@ The Megascans assets were imported at the medium quality tier. The game applies 
 ## Other credited content
 
 - **Roboto** by Google. The HUD uses the Roboto font bundled with Unreal Engine. See the [bundled Roboto license](Roboto-LICENSE.txt).
-- **Tripo**. The Viking house kit includes Tripo-generated meshes alongside team-built Blender modules. See the [module inventory](VikingHouseKit.md).
+- **Tripo**. The Viking house kit includes Tripo-generated meshes alongside team-built Blender modules. See the [module inventory](VikingHouseKit.md). The axolotl warrior villager (`Content/Characters/axolotl_warrior`) is a Tripo-generated mesh, texture set and rig, made from the team's reference art in `Docs/References/FurryAxolotlClasses` with a T-pose sheet drawn in ChatGPT. The archer, druid, blacksmith and jarl heroes (`Content/Characters/axolotl_archer`, `axolotl_druid`, `axolotl_blacksmith`, `axolotl_jarl`) are made the same way, each from the team's reference art with a T-pose sheet drawn in ChatGPT. Their animations are retargeted from the Viking character clips.
 - **ElevenLabs**. The repository includes generation scripts for the soundtrack and environmental sound effects.
 
 ## Provenance to confirm
