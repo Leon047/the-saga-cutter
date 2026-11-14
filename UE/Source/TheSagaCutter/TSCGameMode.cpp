@@ -122,6 +122,8 @@ namespace
 	const float ProShipRun = 2400.f;
 	/** Seconds the sail takes to come down once the ship has stopped; the crew lands after that. */
 	const float ProSailDrop = 2.f;
+	/** The road fence is put up one piece after another over this many seconds, starting once the village wall is done. */
+	const float ProFenceSpan = 8.f;
 	const float DefaultCamArm = 16500.f;
 	TAutoConsoleVariable<int32> CVarPrologue(TEXT("tsc.Prologue"), 1,
 		TEXT("0: the title screen shows the finished village instead of the landfall prologue (also -NoPrologue)."));
@@ -348,14 +350,15 @@ ATSCUnit* ATSCGameMode::SpawnWildlife(ETSCRole InRole, const FVector& Loc, float
 	// Forest animals stay outside the palisade, livestock inside it; the stag and the grove fox live where they were put.
 	switch (InRole)
 	{
-	case ETSCRole::Deer: case ETSCRole::Wolf: U->Zone = ETSCZone::Outside; break;
+	case ETSCRole::Deer: case ETSCRole::Wolf: case ETSCRole::Stag: case ETSCRole::Fox: U->Zone = ETSCZone::Outside; break; // all forest animals
 	case ETSCRole::Cow: case ETSCRole::Bull: U->Zone = ETSCZone::Inside; break;
 	case ETSCRole::Husky: if (Radius > 0.f && IsInsideSettlement(Loc)) { U->Zone = ETSCZone::Inside; } break; // the village dog
 
-	case ETSCRole::Stag: case ETSCRole::Fox: U->Zone = IsInsideSettlement(Loc) ? ETSCZone::Inside : ETSCZone::Outside; break;
 	default: break;
 	}
 	U->OrderWander(Loc, Radius);
+	// Livestock and the village dog (a husky that roams instead of following) arrive only after the village is built.
+	if (InRole == ETSCRole::Cow || InRole == ETSCRole::Bull || (InRole == ETSCRole::Husky && Radius > 0.f)) { FarmAnimals.Add(U); }
 	Wildlife.Add(U);
 	Prims.Add(U); // takes part in the Living / Ashen transition of its region
 	return U;
@@ -363,8 +366,8 @@ ATSCUnit* ATSCGameMode::SpawnWildlife(ETSCRole InRole, const FVector& Loc, float
 
 void ATSCGameMode::SpawnAllWildlife()
 {
-	// The sacred stag keeps to the grove by the stag stone.
-	SpawnWildlife(ETSCRole::Stag, CellF(16.2f, 22.6f), 260.f, TSCRegion::Grove);
+	// The stag lives in the forest, outside the palisade (the grove by the stag stone is inside the wall).
+	SpawnWildlife(ETSCRole::Stag, CellF(2.0f, 21.5f), 320.f, TSCRegion::Forest);
 	// Deer graze in clearings of the western forest (north and south of the road).
 	SpawnWildlife(ETSCRole::Deer, CellF(3.f, 6.f), 350.f, TSCRegion::Forest);
 	SpawnWildlife(ETSCRole::Deer, CellF(3.6f, 6.8f), 350.f, TSCRegion::Forest);
@@ -376,10 +379,11 @@ void ATSCGameMode::SpawnAllWildlife()
 	// Foxes sneak along the forest edges: north of the clearing and behind the grove.
 	SpawnWildlife(ETSCRole::Fox, CellF(6.4f, 2.2f), 300.f, TSCRegion::Forest);
 	SpawnWildlife(ETSCRole::Fox, CellF(10.8f, 25.6f), 300.f, TSCRegion::Grove);
-	// Village livestock grazes in the pasture inside the palisade, south of the gate (two cows and a bull); it never leaves the wall.
-	SpawnWildlife(ETSCRole::Cow, CellF(10.6f, 15.4f), 220.f, TSCRegion::None);
-	SpawnWildlife(ETSCRole::Cow, CellF(11.8f, 17.2f), 220.f, TSCRegion::None);
-	SpawnWildlife(ETSCRole::Bull, CellF(10.0f, 17.8f), 220.f, TSCRegion::None);
+	// Village livestock grazes in the pasture on the right (east / south-east) side of the village, inside the palisade:
+	// the free ground between the south-east house (23,15) and the wall, clear of the garden and the grove. It never leaves the wall.
+	SpawnWildlife(ETSCRole::Cow, CellF(23.0f, 18.9f), 220.f, TSCRegion::None);
+	SpawnWildlife(ETSCRole::Cow, CellF(24.8f, 19.8f), 220.f, TSCRegion::None);
+	SpawnWildlife(ETSCRole::Bull, CellF(23.9f, 20.9f), 220.f, TSCRegion::None);
 	// The village dog runs about inside the palisade, between the hall and the pasture, and plays with the jarl.
 	SpawnWildlife(ETSCRole::Husky, CellF(13.0f, 14.6f), 450.f, TSCRegion::None);
 	// Hakon's husky trots after its master.
@@ -387,6 +391,7 @@ void ATSCGameMode::SpawnAllWildlife()
 	{
 		ATSCUnit* Dog = SpawnWildlife(ETSCRole::Husky, Hunter->GetActorLocation() + FVector(-110.f, 60.f, 0.f), 0.f, TSCRegion::None);
 		Dog->OrderFollow(Hunter);
+		HunterDog = Dog;
 	}
 }
 
@@ -837,6 +842,18 @@ void ATSCGameMode::BeginPlay()
 // Prologue: the settlers land, clear the forest and build; the forest notices. Plays in a loop behind the title.
 // =====================================================================================================================
 
+/** A level actor that is a piece of wooden fence (static mesh or prop blueprint with "Fence" in its mesh / class path). */
+static bool IsFenceProp(const AActor* A)
+{
+	if (A->GetClass()->GetPathName().Contains(TEXT("Fence"))) { return true; }
+	if (const AStaticMeshActor* SM = Cast<AStaticMeshActor>(A))
+	{
+		const UStaticMesh* Mesh = SM->GetStaticMeshComponent() ? SM->GetStaticMeshComponent()->GetStaticMesh() : nullptr;
+		return Mesh && Mesh->GetPathName().Contains(TEXT("Fence"));
+	}
+	return false;
+}
+
 void ATSCGameMode::CollectLevelProps()
 {
 	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
@@ -854,9 +871,17 @@ void ATSCGameMode::CollectLevelProps()
 		const FVector P = A->GetActorLocation();
 		const float Cx = P.X / CELL + GW / 2, Cy = P.Y / CELL + GH / 2;
 		if (Cx < 27.5f && WallShape(Cx, Cy) < 1.08f) { ProLevelProps.Add(A); }
+		else if (Cx < WallCX && IsFenceProp(A)) { ProRoadFence.Add(A); } // the double fence running out of the gate along the road
 	}
 	ProLevelProps.Sort([](const AActor& A, const AActor& B) { return A.GetActorLocation().X > B.GetActorLocation().X; });
-	UE_LOG(LogSaga, Display, TEXT("[Saga] Prologue: %d level props inside the wall"), ProLevelProps.Num());
+	// The road fence is built last, outwards from the gate; remember each piece's own scale (the level may have resized it).
+	const FVector GatePos = CellCorner(GateX, GateY + 1);
+	ProRoadFence.Sort([GatePos](const AActor& A, const AActor& B)
+	{
+		return FVector::DistSquared2D(A.GetActorLocation(), GatePos) < FVector::DistSquared2D(B.GetActorLocation(), GatePos);
+	});
+	for (const AActor* F : ProRoadFence) { ProRoadFenceScale.Add(F->GetActorScale3D()); }
+	UE_LOG(LogSaga, Display, TEXT("[Saga] Prologue: %d level props inside the wall, %d road fence pieces"), ProLevelProps.Num(), ProRoadFence.Num());
 }
 
 void ATSCGameMode::BuildPrologueExtras()
@@ -918,6 +943,8 @@ void ATSCGameMode::StartPrologue()
 	ProLanded = 0;
 	ProStage = 0;
 	bProLandingPlayed = false;
+	for (ATSCUnit* A : FarmAnimals) { if (A) { A->SetActorHiddenInGame(true); } } // they come once the village is built
+	if (HunterDog) { HunterDog->SetActorHiddenInGame(true); }
 	ProDusk = 0.f;
 	ProFade = 1.f;
 	ProCaption.Empty();
@@ -928,6 +955,10 @@ void ATSCGameMode::StartPrologue()
 	for (ATSCPrimActor* S : WallSegs) { S->SetActorHiddenInGame(true); }
 	for (ATSCPrimActor* D : ProDressing) { D->SetActorHiddenInGame(true); }
 	for (AActor* A : ProLevelProps) { if (A) { A->SetActorHiddenInGame(true); } }
+	for (int32 I = 0; I < ProRoadFence.Num(); ++I)
+	{
+		if (ProRoadFence[I]) { ProRoadFence[I]->SetActorScale3D(ProRoadFenceScale[I]); ProRoadFence[I]->SetActorHiddenInGame(true); }
+	}
 	for (ATSCPrimActor* B : ProBuildings) { B->SetBuildProgress(0.f); }
 	for (ATSCPrimActor* T : ProTrees)
 	{
@@ -962,6 +993,9 @@ void ATSCGameMode::EndPrologue()
 
 	Longship->SetActorLocation(ShipMooring);
 	SetSailHoisted(0.f);
+	// the farm animals stay for good, Hakon's dog beside him
+	for (ATSCUnit* A : FarmAnimals) { if (A) { A->SetActorScale3D(FVector::OneVector); A->SetActorHiddenInGame(false); } }
+	if (HunterDog) { HunterDog->SetActorScale3D(FVector::OneVector); HunterDog->SetActorHiddenInGame(false); }
 	for (ATSCPrimActor* S : WallSegs)
 	{
 		S->SetActorScale3D(FVector::OneVector);
@@ -969,6 +1003,10 @@ void ATSCGameMode::EndPrologue()
 	}
 	for (ATSCPrimActor* D : ProDressing) { D->SetActorHiddenInGame(false); }
 	for (AActor* A : ProLevelProps) { if (A) { A->SetActorHiddenInGame(false); } }
+	for (int32 I = 0; I < ProRoadFence.Num(); ++I)
+	{
+		if (ProRoadFence[I]) { ProRoadFence[I]->SetActorScale3D(ProRoadFenceScale[I]); ProRoadFence[I]->SetActorHiddenInGame(false); }
+	}
 	for (ATSCPrimActor* B : ProBuildings) { B->SetBuildProgress(1.f); }
 	for (ATSCPrimActor* T : ProTrees) { T->SetActorHiddenInGame(true); }
 	for (ATSCUnit* W : ProWatchers) { W->SetActorHiddenInGame(true); }
@@ -1101,6 +1139,42 @@ void ATSCGameMode::SimPrologue(float Dt)
 		if (A && A->IsHidden() && T > ProTClear + 5.f + 8.f * I / ProLevelProps.Num()) { A->SetActorHiddenInGame(false); }
 	}
 
+	// ----- last of all the road fence grows out of the gate, piece by piece, as the village is finished -----
+	{
+		const float FenceStart = ProTClear + 10.5f;
+		for (int32 I = 0; I < ProRoadFence.Num(); ++I)
+		{
+			AActor* F = ProRoadFence[I];
+			if (!F) { continue; }
+			const float D = (T - (FenceStart + ProFenceSpan * I / ProRoadFence.Num())) / 0.4f;
+			if (D <= 0.f) { continue; }
+			F->SetActorScale3D(ProRoadFenceScale[I] * FVector(1.f, 1.f, FMath::Clamp(D, 0.05f, 1.f)));
+			if (F->IsHidden()) { F->SetActorHiddenInGame(false); }
+		}
+	}
+
+	// ----- animals: Hakon's dog comes ashore with him; livestock and the village dog arrive once the village is finished -----
+	{
+		if (HunterDog && HunterDog->IsHidden() && Hunter && !Hunter->IsHidden())
+		{
+			HunterDog->Teleport(Hunter->GetActorLocation() + FVector(-110.f, 60.f, 0.f));
+			HunterDog->SetActorHiddenInGame(false);
+		}
+		// finished = the last building and the road fence are both done
+		const float BuiltAt = FMath::Max(ProTClear + 1.f + FMath::Max(ProBuildings.Num() - 1, 0) * 1.2f + 5.5f, ProTClear + 10.5f + ProFenceSpan + 0.4f);
+		const float FarmT = FMath::Min(BuiltAt + 0.5f, ProTWake - 1.5f);
+		if (T >= FarmT)
+		{
+			const float Grow = FMath::SmoothStep(0.f, 1.f, FMath::Clamp((T - FarmT) / 1.2f, 0.f, 1.f));
+			for (ATSCUnit* A : FarmAnimals)
+			{
+				if (!A) { continue; }
+				A->SetActorScale3D(FVector(FMath::Max(Grow, 0.05f)));
+				if (A->IsHidden()) { A->SetActorHiddenInGame(false); }
+			}
+		}
+	}
+
 	// ----- dusk, fog, and the things that grow in it -----
 	ProDusk = FMath::SmoothStep(ProTRaise - 2.5f, ProTRaise + 2.5f, T);
 	for (int32 I = 0; I < ProWatchers.Num(); ++I)
@@ -1196,7 +1270,7 @@ void ATSCGameMode::Tick(float DeltaSeconds)
 			if (Phase == ETSCPhase::Day) { SimDay(Dt); }
 			else if (Phase == ETSCPhase::Night) { SimNight(Dt); }
 			for (int32 I = 0; I < Units.Num(); ++I) { if (Units[I]) { Units[I]->Sim(Dt); } }
-			for (ATSCUnit* A : Wildlife) { if (A) { A->Sim(Dt); } }
+			for (ATSCUnit* A : Wildlife) { if (A && !A->IsHidden()) { A->Sim(Dt); } } // hidden = not arrived yet (prologue)
 		}
 	}
 	{

@@ -935,7 +935,9 @@ namespace TSC
 	{
 		// The imported drakkar (Content/Drakar). Its own materials are kept. Tuning: ShipLength is stem to stern in cm,
 		// ShipYaw turns it if the bow points the wrong way (it must point east, +X); the long axis is found automatically.
-		static UStaticMesh* Ship = LoadNaturalMesh(TEXT("/Game/Drakar/Viking_Ship.Viking_Ship"));
+		// (Not cached while null: a failed first load must not stick for the whole session.)
+		static UStaticMesh* Ship = nullptr;
+		if (!Ship) { Ship = LoadNaturalMesh(TEXT("/Game/Drakar/Viking_Ship.Viking_Ship")); }
 		if (Ship)
 		{
 			constexpr float ShipLength = 720.f;
@@ -954,8 +956,9 @@ namespace TSC
 			// The sail is a separate mesh (Content/Drakar/Sail). If it was authored in the hull's frame (its centre lies inside
 			// the hull's bounds) it gets the very same transform; otherwise it is fitted onto the mast by size. It is shown
 			// only while the dock is Living.
-			static UStaticMesh* SailMesh = LoadNaturalMesh(TEXT("/Game/Drakar/Sail.Sail"));
-			const float Top = Size.Z * Scale + ShipKeelZ;
+			static UStaticMesh* SailMesh = nullptr;
+			if (!SailMesh) { SailMesh = LoadNaturalMesh(TEXT("/Game/Drakar/Sail.Sail")); }
+			const float Top = Size.Z * Scale + ShipKeelZ; // mast top, used to fit the sail if it was not authored in the hull's frame
 			if (SailMesh)
 			{
 				const FBoxSphereBounds SB = SailMesh->GetBounds();
@@ -977,44 +980,12 @@ namespace TSC
 				A->SetVis(SailPart, ETSCVis::LivingOnly);
 				return Pivot;
 			}
-			// Without the sail asset: a striped one from primitives.
-			const float SailW = 0.32f * ShipLength;
-			const float SailH = 0.6f * Top;
-			const float SailZ = 0.32f * Top + SailH * 0.5f;
-			constexpr int32 Strips = 5;
-			for (int32 I = 0; I < Strips; ++I)
-			{
-				const int32 Sail = A->AddPart(ETSCShape::Cube, FVector(-SailW * 0.5f + SailW / Strips * (I + 0.5f), 0.f, SailZ), FRotator::ZeroRotator,
-					FVector(SailW / Strips / 100.f, 0.04f, SailH / 100.f), I % 2 ? FLinearColor(0.6f, 0.56f, 0.48f) : Pal::Red);
-				A->SetVis(Sail, ETSCVis::LivingOnly);
-			}
+			// No primitive sail either: the old one must never come back.
+			UE_LOG(LogTemp, Error, TEXT("[Saga] /Game/Drakar/Sail could not be loaded: the longship has no sail"));
 			return nullptr;
 		}
-		// Fallback without the asset: a primitive hull along X, bow to the east.
-		const int32 Hull = A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 26.f), FRotator::ZeroRotator, FVector(5.2f, 1.1f, 0.5f), Pal::Timber * 1.1f);
-		A->SetAshen(Hull, Pal::Char);
-		A->AddPart(ETSCShape::Cube, FVector(0.f, 0.f, 50.f), FRotator::ZeroRotator, FVector(5.0f, 0.9f, 0.06f), Pal::Plank);
-		for (int32 End = 0; End < 2; ++End)
-		{
-			const float Dir = End == 0 ? -1.f : 1.f;
-			const int32 Prow = A->AddPart(ETSCShape::Cone, FVector(Dir * 300.f, 0.f, 70.f), FRotator(Dir * -55.f, 0.f, 0.f), FVector(0.8f, 0.6f, 1.9f), Pal::Timber);
-			A->SetAshen(Prow, Pal::Char);
-		}
-		const int32 Mast = A->AddPart(ETSCShape::Cylinder, FVector(0.f, 0.f, 230.f), FRotator::ZeroRotator, FVector(0.14f, 0.14f, 3.7f), Pal::TimberDark);
-		A->SetVis(Mast, ETSCVis::LivingOnly);
-		for (int32 I = 0; I < 5; ++I)
-		{
-			const int32 Sail = A->AddPart(ETSCShape::Cube, FVector(-120.f + I * 60.f, 0.f, 270.f), FRotator::ZeroRotator, FVector(0.6f, 0.04f, 2.2f),
-				I % 2 ? FLinearColor(0.6f, 0.56f, 0.48f) : Pal::Red);
-			A->SetVis(Sail, ETSCVis::LivingOnly);
-		}
-		for (int32 I = 0; I < 6; ++I)
-		{
-			const int32 Sh = A->AddPart(ETSCShape::Cylinder, FVector(-200.f + I * 80.f, 58.f, 50.f), FRotator(0.f, 0.f, 90.f), FVector(0.36f, 0.36f, 0.05f),
-				I % 2 ? Pal::Red : FLinearColor(0.5f, 0.38f, 0.06f));
-			A->SetVis(Sh, I % 3 == 0 ? ETSCVis::Both : ETSCVis::LivingOnly);
-			A->SetAshen(Sh, Pal::Char);
-		}
+		// No primitive stand-in: the old drakkar must never come back. A missing asset is an error (see DirectoriesToAlwaysCook).
+		UE_LOG(LogTemp, Error, TEXT("[Saga] /Game/Drakar/Viking_Ship could not be loaded: the longship is missing"));
 		return nullptr;
 	}
 

@@ -305,6 +305,9 @@ private:
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProBuildings;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProDressing;
 	UPROPERTY() TArray<TObjectPtr<AActor>> ProLevelProps;
+	/** The fence outside the wall (along the road from the gate), nearest to the gate first, with its level scale. Built at the end of the prologue. */
+	UPROPERTY() TArray<TObjectPtr<AActor>> ProRoadFence;
+	TArray<FVector> ProRoadFenceScale;
 	UPROPERTY() TArray<TObjectPtr<ATSCPrimActor>> ProTrees;
 	TArray<float> ProTreeFell;      // time each tree starts to fall
 	TArray<float> ProTreeYaw;       // direction it falls in
@@ -350,6 +353,10 @@ private:
 	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> Workers;
 	/** Animals from Content/Animals: kept out of Units (no fights, no night clean-up), simulated alongside them. */
 	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> Wildlife;
+	/** Cows, the bull and the village dog: not there until the village is built (prologue). */
+	UPROPERTY() TArray<TObjectPtr<ATSCUnit>> FarmAnimals;
+	/** Hakon's husky: appears with him when he lands (prologue). */
+	UPROPERTY() TObjectPtr<ATSCUnit> HunterDog;
 
 	// atmosphere
 	UPROPERTY() TObjectPtr<AActor> AtmoActor;

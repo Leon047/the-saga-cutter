@@ -97,6 +97,8 @@ namespace
 	constexpr float FleeRadius = 700.f;
 	/** Prey keeps running this long after the last wolf sighting (s). */
 	constexpr float FleeLinger = 2.5f;
+	/** Forest animals run from any person this close (cm; 3 cells). */
+	constexpr float HumanFleeRadius = 600.f;
 	/** The village dog notices the jarl from this far (cm; 3.5 cells). */
 	constexpr float JarlNoticeRadius = 700.f;
 	/** The husky attacks enemies this close to its master (cm; 3 cells). */
@@ -527,6 +529,33 @@ bool ATSCUnit::SimWildlife(float Dt)
 		}
 	}
 
+	// Forest animals (all of them, wolves too) keep away from people: anyone within HumanFleeRadius sends them galloping off.
+	// Never the dogs or the livestock. The wall still stops them (see StepToward), they run along it instead.
+	if (Role == ETSCRole::Deer || Role == ETSCRole::Stag || Role == ETSCRole::Fox || Role == ETSCRole::Wolf)
+	{
+		// Failsafe: a forest animal that finds itself inside the village goes back to its range outside.
+		if (Zone != ETSCZone::Free && !ZoneAllows(GetActorLocation()))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Saga] Forest animal (role %d) found inside the village at %s: sent back to %s"),
+				(int32)Role, *GetActorLocation().ToString(), *HoldPos.ToString());
+			Teleport(HoldPos);
+			Path.Reset();
+		}
+		const FVector Me = Loc2D();
+		float Nearest = HumanFleeRadius;
+		for (const ATSCUnit* H : GM->Units)
+		{
+			if (!H || H->IsWildlife() || H->Team == ETSCTeam::Creature || !H->IsTargetable() || H->IsHidden()) { continue; }
+			const float D = FVector::Dist2D(Me, H->GetActorLocation());
+			if (D < Nearest)
+			{
+				Nearest = D;
+				FleeFrom = H->Loc2D();
+				FleeTimer = FMath::Max(FleeTimer, FleeLinger);
+			}
+		}
+	}
+
 	// Prey: a wolf within range sends deer, the stag and foxes galloping away; they keep running a moment after.
 	if (Role == ETSCRole::Deer || Role == ETSCRole::Stag || Role == ETSCRole::Fox)
 	{
@@ -549,6 +578,12 @@ bool ATSCUnit::SimWildlife(float Dt)
 			FleeTimer -= Dt;
 			FVector Away = (Me - FleeFrom).GetSafeNormal2D();
 			if (Away.IsNearlyZero()) { Away = GetActorForwardVector().GetSafeNormal2D(); }
+			// If the wall is in the way, run along it: turn until the way ahead is open to this animal.
+			for (const float Turn : { 0.f, 40.f, -40.f, 80.f, -80.f, 120.f, -120.f })
+			{
+				const FVector Dir = Away.RotateAngleAxis(Turn, FVector::UpVector);
+				if (ZoneAllows(Me + Dir * 150.f)) { Away = Dir; break; }
+			}
 			bGallop = true;
 			Speed = BaseSpeed * FleeSpeedMul;
 			StepToward(Me + Away * 400.f, Dt, 10.f);
